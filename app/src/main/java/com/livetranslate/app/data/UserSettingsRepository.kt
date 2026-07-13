@@ -1,0 +1,100 @@
+package com.livetranslate.app.data
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "user_settings")
+
+class UserSettingsRepository(private val context: Context) {
+    private object Keys {
+        val endpoint = stringPreferencesKey("endpoint")
+        val modelId = stringPreferencesKey("model_id")
+        val sourceLanguage = stringPreferencesKey("source_language")
+        val targetLanguage = stringPreferencesKey("target_language")
+        val fontSizeSp = floatPreferencesKey("font_size_sp")
+        val backgroundAlpha = floatPreferencesKey("background_alpha")
+        val bilingual = booleanPreferencesKey("bilingual")
+        val playTranslatedAudio = booleanPreferencesKey("play_translated_audio")
+        val translatedVolume = floatPreferencesKey("translated_volume")
+        val overlayX = intPreferencesKey("overlay_x")
+        val overlayY = intPreferencesKey("overlay_y")
+        val overlayWidthDp = intPreferencesKey("overlay_width_dp")
+        val overlayHeightDp = intPreferencesKey("overlay_height_dp")
+    }
+
+    val settings: Flow<UserSettings> = context.dataStore.data.map { prefs ->
+        UserSettings(
+            endpoint = prefs[Keys.endpoint] ?: UserSettings.Defaults.ENDPOINT,
+            modelId = prefs[Keys.modelId] ?: UserSettings.Defaults.MODEL_ID,
+            sourceLanguageCode = prefs[Keys.sourceLanguage] ?: UserSettings.Defaults.SOURCE_LANGUAGE,
+            targetLanguageCode = prefs[Keys.targetLanguage] ?: UserSettings.Defaults.TARGET_LANGUAGE,
+            fontSizeSp = prefs[Keys.fontSizeSp] ?: UserSettings.Defaults.FONT_SIZE_SP,
+            backgroundAlpha = prefs[Keys.backgroundAlpha] ?: UserSettings.Defaults.BACKGROUND_ALPHA,
+            bilingual = prefs[Keys.bilingual] ?: UserSettings.Defaults.BILINGUAL,
+            playTranslatedAudio = prefs[Keys.playTranslatedAudio]
+                ?: UserSettings.Defaults.PLAY_TRANSLATED_AUDIO,
+            translatedVolume = prefs[Keys.translatedVolume] ?: UserSettings.Defaults.TRANSLATED_VOLUME,
+            overlayX = prefs[Keys.overlayX] ?: UserSettings.Defaults.OVERLAY_X,
+            overlayY = prefs[Keys.overlayY] ?: UserSettings.Defaults.OVERLAY_Y,
+            overlayWidthDp = prefs[Keys.overlayWidthDp] ?: UserSettings.Defaults.OVERLAY_WIDTH_DP,
+            overlayHeightDp = prefs[Keys.overlayHeightDp] ?: UserSettings.Defaults.OVERLAY_HEIGHT_DP,
+        )
+    }
+
+    suspend fun update(transform: (UserSettings) -> UserSettings) {
+        context.dataStore.edit { prefs ->
+            val current = UserSettings(
+                endpoint = prefs[Keys.endpoint] ?: UserSettings.Defaults.ENDPOINT,
+                modelId = prefs[Keys.modelId] ?: UserSettings.Defaults.MODEL_ID,
+                sourceLanguageCode = prefs[Keys.sourceLanguage] ?: UserSettings.Defaults.SOURCE_LANGUAGE,
+                targetLanguageCode = prefs[Keys.targetLanguage] ?: UserSettings.Defaults.TARGET_LANGUAGE,
+                fontSizeSp = prefs[Keys.fontSizeSp] ?: UserSettings.Defaults.FONT_SIZE_SP,
+                backgroundAlpha = prefs[Keys.backgroundAlpha] ?: UserSettings.Defaults.BACKGROUND_ALPHA,
+                bilingual = prefs[Keys.bilingual] ?: UserSettings.Defaults.BILINGUAL,
+                playTranslatedAudio = prefs[Keys.playTranslatedAudio]
+                    ?: UserSettings.Defaults.PLAY_TRANSLATED_AUDIO,
+                translatedVolume = prefs[Keys.translatedVolume]
+                    ?: UserSettings.Defaults.TRANSLATED_VOLUME,
+                overlayX = prefs[Keys.overlayX] ?: UserSettings.Defaults.OVERLAY_X,
+                overlayY = prefs[Keys.overlayY] ?: UserSettings.Defaults.OVERLAY_Y,
+                overlayWidthDp = prefs[Keys.overlayWidthDp] ?: UserSettings.Defaults.OVERLAY_WIDTH_DP,
+                overlayHeightDp = prefs[Keys.overlayHeightDp]
+                    ?: UserSettings.Defaults.OVERLAY_HEIGHT_DP,
+            )
+            val next = transform(current)
+            prefs[Keys.endpoint] = next.endpoint
+            prefs[Keys.modelId] = next.modelId
+            prefs[Keys.sourceLanguage] = next.sourceLanguageCode
+            prefs[Keys.targetLanguage] = next.targetLanguageCode
+            prefs[Keys.fontSizeSp] = next.fontSizeSp
+            prefs[Keys.backgroundAlpha] = next.backgroundAlpha
+            prefs[Keys.bilingual] = next.bilingual
+            prefs[Keys.playTranslatedAudio] = next.playTranslatedAudio
+            prefs[Keys.translatedVolume] = next.translatedVolume
+            prefs[Keys.overlayX] = next.overlayX
+            prefs[Keys.overlayY] = next.overlayY
+            prefs[Keys.overlayWidthDp] = next.overlayWidthDp
+            prefs[Keys.overlayHeightDp] = next.overlayHeightDp
+        }
+    }
+
+    suspend fun resetOverlayLayout() {
+        update {
+            it.copy(
+                overlayX = UserSettings.Defaults.OVERLAY_X,
+                overlayY = UserSettings.Defaults.OVERLAY_Y,
+                overlayWidthDp = UserSettings.Defaults.OVERLAY_WIDTH_DP,
+                overlayHeightDp = UserSettings.Defaults.OVERLAY_HEIGHT_DP,
+            )
+        }
+    }
+}
