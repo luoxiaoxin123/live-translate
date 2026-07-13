@@ -87,13 +87,12 @@ class UserSettingsRepository(private val context: Context) {
         }
     }
 
-    suspend fun resetOverlayLayout() {
+    suspend fun resetSubtitleAppearance() {
         update {
             it.copy(
-                overlayX = UserSettings.Defaults.OVERLAY_X,
-                overlayY = UserSettings.Defaults.OVERLAY_Y,
-                overlayWidthDp = UserSettings.Defaults.OVERLAY_WIDTH_DP,
-                overlayHeightDp = UserSettings.Defaults.OVERLAY_HEIGHT_DP,
+                fontSizeSp = UserSettings.Defaults.FONT_SIZE_SP,
+                backgroundAlpha = UserSettings.Defaults.BACKGROUND_ALPHA,
+                bilingual = UserSettings.Defaults.BILINGUAL,
             )
         }
     }
