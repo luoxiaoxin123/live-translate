@@ -174,6 +174,9 @@ class SubtitleSessionService : Service() {
                         is LiveTranslateClient.LiveEvent.Error -> {
                             SessionBus.setStatus(SessionBus.Status.Error, event.message)
                         }
+                        is LiveTranslateClient.LiveEvent.Debug -> {
+                            Log.d(TAG, event.message)
+                        }
                     }
                 }
             }
