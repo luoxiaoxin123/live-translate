@@ -8,22 +8,38 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.livetranslate.app.ui.components.PageTitle
+import com.livetranslate.app.ui.components.SectionCard
+import com.livetranslate.app.ui.components.SectionLabel
+import com.livetranslate.app.ui.components.SettingSwitchRow
+import com.livetranslate.app.ui.theme.Booth
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.preference.SwitchPreference
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 fun SettingsScreen(
@@ -32,137 +48,235 @@ fun SettingsScreen(
     onOpenOverlayPermission: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val apiKey by viewModel.apiKeyDraft.collectAsStateWithLifecycle()
+    val apiKeyFromVm by viewModel.apiKeyDraft.collectAsStateWithLifecycle()
     val testResult by viewModel.testResult.collectAsStateWithLifecycle()
     val testing by viewModel.testing.collectAsStateWithLifecycle()
 
-    val endpointValue = remember(settings.endpoint) { TextFieldValue(settings.endpoint) }
-    val modelValue = remember(settings.modelId) { TextFieldValue(settings.modelId) }
-    val apiKeyValue = remember(apiKey) { TextFieldValue(apiKey) }
+    // Local TextFieldValue keeps selection/cursor. Never recreate from plain String each keystroke.
+    var endpointField by remember {
+        mutableStateOf(TextFieldValue(settings.endpoint, TextRange(settings.endpoint.length)))
+    }
+    var modelField by remember {
+        mutableStateOf(TextFieldValue(settings.modelId, TextRange(settings.modelId.length)))
+    }
+    var apiKeyField by remember {
+        mutableStateOf(TextFieldValue(apiKeyFromVm, TextRange(apiKeyFromVm.length)))
+    }
+    var revealKey by remember { mutableStateOf(false) }
+
+    // Hydrate once from DataStore when first non-default values arrive (without clobbering typing)
+    var endpointHydrated by remember { mutableStateOf(false) }
+    var modelHydrated by remember { mutableStateOf(false) }
+    LaunchedEffect(settings.endpoint) {
+        if (!endpointHydrated && settings.endpoint.isNotBlank()) {
+            endpointField = TextFieldValue(settings.endpoint, TextRange(settings.endpoint.length))
+            endpointHydrated = true
+        }
+    }
+    LaunchedEffect(settings.modelId) {
+        if (!modelHydrated && settings.modelId.isNotBlank()) {
+            modelField = TextFieldValue(settings.modelId, TextRange(settings.modelId.length))
+            modelHydrated = true
+        }
+    }
+    LaunchedEffect(apiKeyFromVm) {
+        // Only sync if field empty and store has value (first load)
+        if (apiKeyField.text.isEmpty() && apiKeyFromVm.isNotEmpty()) {
+            apiKeyField = TextFieldValue(apiKeyFromVm, TextRange(apiKeyFromVm.length))
+        }
+    }
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = Booth.Accent,
+        unfocusedBorderColor = MiuixTheme.colorScheme.outline.copy(alpha = 0.35f),
+        focusedLabelColor = Booth.Accent,
+        cursorColor = Booth.Accent,
+        focusedContainerColor = MiuixTheme.colorScheme.surface,
+        unfocusedContainerColor = MiuixTheme.colorScheme.surface,
+    )
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(text = "设置")
+        PageTitle("设置", "API、字幕外观与译音")
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+        SectionCard {
+            SectionLabel("API 连接")
+            Text(
+                text = "默认对接 Google AI Studio Live Translate。可自定义兼容端点。",
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+
+            OutlinedTextField(
+                value = endpointField,
+                onValueChange = { v ->
+                    endpointField = v
+                    viewModel.update { it.copy(endpoint = v.text.trim()) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { androidx.compose.material3.Text("API 端点") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = fieldColors,
+            )
+
+            OutlinedTextField(
+                value = apiKeyField,
+                onValueChange = { v ->
+                    apiKeyField = v
+                    viewModel.setApiKeyDraft(v.text)
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { androidx.compose.material3.Text("API Key") },
+                singleLine = true,
+                visualTransformation = if (revealKey) {
+                    VisualTransformation.None
+                } else {
+                    PasswordVisualTransformation()
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                trailingIcon = {
+                    TextButton(
+                        text = if (revealKey) "隐藏" else "显示",
+                        onClick = { revealKey = !revealKey },
+                    )
+                },
+                shape = RoundedCornerShape(14.dp),
+                colors = fieldColors,
+            )
+
+            OutlinedTextField(
+                value = modelField,
+                onValueChange = { v ->
+                    modelField = v
+                    viewModel.update { it.copy(modelId = v.text.trim()) }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                label = { androidx.compose.material3.Text("模型 ID") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+                colors = fieldColors,
+            )
+
+            Button(
+                onClick = {
+                    viewModel.saveApiKey()
+                    viewModel.testConnection()
+                },
+                enabled = !testing,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColorsPrimary(),
             ) {
-                Text(text = "API 连接")
-                Text(text = "端点（默认 AI Studio Live WebSocket）")
-                TextField(
-                    value = endpointValue,
-                    onValueChange = { v ->
-                        viewModel.update { it.copy(endpoint = v.text.trim()) }
+                Text(
+                    text = if (testing) "测试中…" else "保存并测试连接",
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            TextButton(
+                text = "仅保存 API Key",
+                onClick = viewModel::saveApiKey,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            if (!testResult.isNullOrBlank()) {
+                Text(
+                    text = testResult.orEmpty(),
+                    fontSize = 13.sp,
+                    color = when {
+                        testResult!!.startsWith("✅") -> Booth.Success
+                        testResult!!.startsWith("❌") -> Booth.Danger
+                        else -> MiuixTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Endpoint",
-                    singleLine = true,
-                )
-                Text(text = "API Key（本地加密存储）")
-                TextField(
-                    value = apiKeyValue,
-                    onValueChange = { v -> viewModel.setApiKeyDraft(v.text) },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "API Key",
-                    singleLine = true,
-                )
-                TextButton(text = "保存 API Key", onClick = viewModel::saveApiKey)
-                Text(text = "模型 ID")
-                TextField(
-                    value = modelValue,
-                    onValueChange = { v ->
-                        viewModel.update { it.copy(modelId = v.text.trim()) }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "Model ID",
-                    singleLine = true,
-                )
-                Button(
-                    onClick = viewModel::testConnection,
-                    enabled = !testing,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColorsPrimary(),
-                ) {
-                    Text(text = if (testing) "测试中…" else "连接测试")
-                }
-                if (!testResult.isNullOrBlank()) {
-                    Text(text = testResult.orEmpty())
-                }
-                Text(text = "协议对齐官方 Live Translate：setup + translationConfig + PCM realtimeInput。")
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(text = "字幕外观")
-                Text(text = "字体大小：${settings.fontSizeSp.toInt()} sp（系统默认字体）")
-                Slider(
-                    value = settings.fontSizeSp,
-                    onValueChange = { size -> viewModel.update { it.copy(fontSizeSp = size) } },
-                    valueRange = 12f..32f,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(text = "黑底透明度：${(settings.backgroundAlpha * 100).toInt()}%")
-                Slider(
-                    value = settings.backgroundAlpha,
-                    onValueChange = { a -> viewModel.update { it.copy(backgroundAlpha = a) } },
-                    valueRange = 0.1f..0.95f,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                SwitchPreference(
-                    checked = settings.bilingual,
-                    onCheckedChange = { c -> viewModel.update { it.copy(bilingual = c) } },
-                    title = "双语显示",
-                    summary = if (settings.bilingual) "显示原文 + 译文" else "仅显示译文",
-                )
-                TextButton(text = "重置字幕位置与尺寸", onClick = viewModel::resetOverlayLayout)
-            }
-        }
-
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(text = "译音（云端返回音频）")
-                SwitchPreference(
-                    checked = settings.playTranslatedAudio,
-                    onCheckedChange = { c -> viewModel.update { it.copy(playTranslatedAudio = c) } },
-                    title = "播放译音",
-                    summary = "默认关闭。开启后与原视频/音频并行播放，不会暂停原声。",
-                )
-                Text(text = "译音音量：${(settings.translatedVolume * 100).toInt()}%")
-                Slider(
-                    value = settings.translatedVolume,
-                    onValueChange = { v -> viewModel.update { it.copy(translatedVolume = v) } },
-                    valueRange = 0f..1f,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
+
+            Text(
+                text = "国内网络需能访问 Google。连接失败时请检查代理/VPN。",
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.45f),
+            )
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(text = "权限与关于")
-                TextButton(text = "打开悬浮窗权限设置", onClick = onOpenOverlayPermission)
-                Text(text = "启动字幕时会请求系统录屏授权，用于捕获其它 App 的播放声音。")
-                Text(text = "开源个人项目 · API Key 仅存本机 · v0.1.0")
-            }
+        SectionCard {
+            SectionLabel("字幕外观")
+            Text(
+                text = "字体大小 ${settings.fontSizeSp.toInt()} sp · 系统默认字体",
+                fontSize = 13.sp,
+            )
+            Slider(
+                value = settings.fontSizeSp,
+                onValueChange = { size -> viewModel.update { it.copy(fontSizeSp = size) } },
+                valueRange = 12f..32f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "黑底透明度 ${(settings.backgroundAlpha * 100).toInt()}%",
+                fontSize = 13.sp,
+            )
+            Slider(
+                value = settings.backgroundAlpha,
+                onValueChange = { a -> viewModel.update { it.copy(backgroundAlpha = a) } },
+                valueRange = 0.1f..0.95f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            SettingSwitchRow(
+                title = "双语显示",
+                summary = if (settings.bilingual) "显示原文 + 译文" else "仅显示译文",
+                checked = settings.bilingual,
+                onCheckedChange = { c -> viewModel.update { it.copy(bilingual = c) } },
+            )
+            TextButton(
+                text = "重置字幕位置与尺寸",
+                onClick = viewModel::resetOverlayLayout,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
+        SectionCard {
+            SectionLabel("译音")
+            SettingSwitchRow(
+                title = "播放译音",
+                summary = "云端返回的翻译语音；默认关。开启后与原声并行，不暂停视频。",
+                checked = settings.playTranslatedAudio,
+                onCheckedChange = { c -> viewModel.update { it.copy(playTranslatedAudio = c) } },
+            )
+            Text(
+                text = "译音音量 ${(settings.translatedVolume * 100).toInt()}%",
+                fontSize = 13.sp,
+            )
+            Slider(
+                value = settings.translatedVolume,
+                onValueChange = { v -> viewModel.update { it.copy(translatedVolume = v) } },
+                valueRange = 0f..1f,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        SectionCard {
+            SectionLabel("权限与关于")
+            TextButton(
+                text = "打开悬浮窗权限设置",
+                onClick = onOpenOverlayPermission,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "启动字幕时会请求系统录屏授权，用于捕获其它 App 的播放声音。",
+                fontSize = 13.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+            )
+            Text(
+                text = "开源个人项目 · API Key 仅存本机 · v0.1.0",
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
     }
 }
