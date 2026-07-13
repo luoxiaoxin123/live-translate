@@ -1,0 +1,40 @@
+# Built artifacts
+**/build/
+**/.gradle/
+**/captures/
+**/out/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Local config / secrets
+local.properties
+*.jks
+*.keystore
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# NDK / CMake
+.externalNativeBuild/
+.cxx/
+
+# Kotlin
+.kotlin/
+
+# OS / editors
+*.swp
+*~
+.vscode/
+.fleet/
+
+# Nested third-party clone (use Maven dependency instead)
+# Keep folder on disk for reference if present; do not publish as part of this app.
+miuix/
+
+# Logs
+*.log
+nul
