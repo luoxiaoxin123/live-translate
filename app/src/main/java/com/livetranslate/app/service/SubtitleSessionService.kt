@@ -169,7 +169,10 @@ class SubtitleSessionService : Service() {
                             SessionBus.setPreview(output = text)
                         }
                         is LiveTranslateClient.LiveEvent.AudioChunk -> {
-                            player.playPcm(event.pcm, event.mimeType)
+                            // Enqueue only — never block main with AudioTrack.write
+                            if (currentSettings.playTranslatedAudio) {
+                                player.playPcm(event.pcm, event.mimeType)
+                            }
                         }
                         is LiveTranslateClient.LiveEvent.Error -> {
                             SessionBus.setStatus(SessionBus.Status.Error, event.message)
@@ -184,10 +187,15 @@ class SubtitleSessionService : Service() {
             // React to settings changes (style / audio) while running
             settingsJob = scope.launch {
                 app.settingsRepository.settings.collectLatest { s ->
+                    val prevPlay = currentSettings.playTranslatedAudio
                     currentSettings = s
                     overlay?.updateSettings(s)
                     player.setEnabled(s.playTranslatedAudio)
                     player.setVolume(s.translatedVolume)
+                    // Turning off mid-session: drop any backlog immediately
+                    if (prevPlay && !s.playTranslatedAudio) {
+                        Log.i(TAG, "translated audio disabled — queue cleared by player")
+                    }
                 }
             }
         }
