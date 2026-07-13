@@ -23,8 +23,9 @@
 
 - Android **10+**（API 29，内录 API）
 - JDK 17+
-- Android SDK 35
-- 网络与 AI Studio API Key
+- Android SDK 37（compileSdk）
+- **能访问 Google 的网络**（`generativelanguage.googleapis.com`）。国内手机通常需要系统级代理/VPN，否则连接测试会失败
+- AI Studio API Key
 
 ## 构建
 

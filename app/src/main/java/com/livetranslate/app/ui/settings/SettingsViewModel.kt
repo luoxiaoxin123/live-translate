@@ -50,28 +50,61 @@ class SettingsViewModel(
     fun testConnection() {
         viewModelScope.launch {
             _testing.value = true
-            _testResult.value = "测试中…"
+            _testResult.value = "测试中…（需能访问 Google，国内网络通常要代理）"
             val s = settings.value
-            val key = _apiKeyDraft.value.ifBlank { apiKeyStore.getApiKey() }
+            val key = _apiKeyDraft.value.ifBlank { apiKeyStore.getApiKey() }.trim()
             if (key.isBlank()) {
                 _testResult.value = "失败：API Key 为空"
                 _testing.value = false
                 return@launch
             }
+            if (key.length < 16) {
+                _testResult.value = "失败：API Key 太短，请检查是否粘贴完整"
+                _testing.value = false
+                return@launch
+            }
             // Persist draft key before test
             apiKeyStore.setApiKey(key)
+            val endpoint = s.endpoint.trim().ifBlank { UserSettings.Defaults.ENDPOINT }
+            val modelId = s.modelId.trim().ifBlank { UserSettings.Defaults.MODEL_ID }
             val client = LiveTranslateClient()
-            val result = client.testConnection(
-                LiveTranslateClient.SessionConfig(
-                    endpoint = s.endpoint,
-                    apiKey = key,
-                    modelId = s.modelId,
-                    targetLanguageCode = s.targetLanguageCode,
-                ),
-            )
+            val result = runCatching {
+                client.testConnection(
+                    LiveTranslateClient.SessionConfig(
+                        endpoint = endpoint,
+                        apiKey = key,
+                        modelId = modelId,
+                        targetLanguageCode = s.targetLanguageCode.ifBlank { "zh-Hans" },
+                    ),
+                ).getOrElse { throw it }
+            }
             _testResult.value = result.fold(
-                onSuccess = { it },
-                onFailure = { "失败：${it.message}" },
+                onSuccess = { "✅ $it\n端点/模型已验证" },
+                onFailure = { e ->
+                    val msg = e.message.orEmpty()
+                    buildString {
+                        append("❌ 失败：")
+                        append(msg.ifBlank { e.javaClass.simpleName })
+                        append('\n')
+                        when {
+                            msg.contains("Unable to resolve host", ignoreCase = true) ||
+                                msg.contains("Failed to connect", ignoreCase = true) ||
+                                msg.contains("timeout", ignoreCase = true) ||
+                                msg.contains("Connecting", ignoreCase = true) ->
+                                append("提示：多半是手机访问不了 Google。请开系统代理/VPN 后再测。")
+                            msg.contains("API_KEY", ignoreCase = true) ||
+                                msg.contains("401") ||
+                                msg.contains("403") ||
+                                msg.contains("PERMISSION", ignoreCase = true) ->
+                                append("提示：Key 无效、被禁用，或未开通 Generative Language API。")
+                            msg.contains("not found", ignoreCase = true) ||
+                                msg.contains("404") ->
+                                append("提示：模型 ID 可能不对，确认是 gemini-3.5-live-translate-preview")
+                            else ->
+                                append("端点默认应为 AI Studio Live WebSocket（见 README）。")
+                        }
+                    }
+                },
             )
             client.destroy()
             _testing.value = false

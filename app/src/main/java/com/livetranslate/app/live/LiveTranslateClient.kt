@@ -4,7 +4,6 @@ import android.util.Base64
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
@@ -14,7 +13,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -27,18 +28,41 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Minimal Gemini Live Translate WebSocket client.
- * Protocol: https://ai.google.dev/gemini-api/docs/live-api/live-translate
+ * Gemini Live Translate WebSocket client.
+ *
+ * Wire format aligned with:
+ * - https://ai.google.dev/gemini-api/docs/live-api/live-translate
+ * - google-genai Python SDK `_LiveConnectParameters_to_mldev` converter
+ *
+ * Correct setup shape (AI Studio / mldev):
+ * ```
+ * {
+ *   "setup": {
+ *     "model": "models/gemini-3.5-live-translate-preview",
+ *     "generationConfig": {
+ *       "responseModalities": ["AUDIO"],
+ *       "translationConfig": {
+ *         "targetLanguageCode": "zh-Hans",
+ *         "echoTargetLanguage": true
+ *       }
+ *     },
+ *     "inputAudioTranscription": {},
+ *     "outputAudioTranscription": {}
+ *   }
+ * }
+ * ```
  */
 class LiveTranslateClient {
     private val client = OkHttpClient.Builder()
-        .pingInterval(15, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
+        .pingInterval(15, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private var webSocket: WebSocket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var receiveJob: Job? = null
 
     private val setupComplete = AtomicBoolean(false)
     private val intentionalClose = AtomicBoolean(false)
@@ -47,7 +71,8 @@ class LiveTranslateClient {
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val _events = MutableSharedFlow<LiveEvent>(
-        extraBufferCapacity = 64,
+        replay = 0,
+        extraBufferCapacity = 128,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val events: SharedFlow<LiveEvent> = _events.asSharedFlow()
@@ -77,23 +102,46 @@ class LiveTranslateClient {
         }
         data class Error(val message: String) : LiveEvent()
         data object SetupComplete : LiveEvent()
+        data class Debug(val message: String) : LiveEvent()
     }
 
     fun connect(config: SessionConfig) {
-        close()
+        closeInternal(intentional = true, notify = false)
         intentionalClose.set(false)
         setupComplete.set(false)
         _connectionState.value = ConnectionState.Connecting
 
-        val url = buildUrl(config.endpoint, config.apiKey)
-        val request = Request.Builder().url(url).build()
+        val key = config.apiKey.trim()
+        if (key.isBlank()) {
+            fail("API Key 为空")
+            return
+        }
+        if (config.endpoint.trim().isBlank()) {
+            fail("端点为空")
+            return
+        }
+
+        val url = buildUrl(config.endpoint, key)
+        Log.i(TAG, "Connecting (key redacted): ${redactUrl(url)}")
+        emitDebug("连接中… ${redactUrl(url)}")
+
+        val request = Request.Builder()
+            .url(url)
+            .header("Content-Type", "application/json")
+            .build()
+
         webSocket = client.newWebSocket(
             request,
             object : WebSocketListener() {
                 override fun onOpen(webSocket: WebSocket, response: Response) {
-                    Log.i(TAG, "WebSocket open")
+                    Log.i(TAG, "WebSocket open code=${response.code}")
+                    emitDebug("WebSocket 已打开，发送 setup…")
                     val setup = buildSetupMessage(config)
-                    webSocket.send(setup)
+                    Log.i(TAG, "setup payload: $setup")
+                    val ok = webSocket.send(setup)
+                    if (!ok) {
+                        fail("发送 setup 失败（socket 未就绪）")
+                    }
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) {
@@ -101,23 +149,41 @@ class LiveTranslateClient {
                 }
 
                 override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                    // Server may send binary JSON frames.
                     handleMessage(bytes.utf8())
                 }
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (intentionalClose.get()) return
-                    val msg = t.message ?: "WebSocket failure"
-                    Log.e(TAG, "WebSocket failure", t)
-                    _connectionState.value = ConnectionState.Failed(msg)
-                    scope.launch { _events.emit(LiveEvent.Error(msg)) }
+                    val body = runCatching { response?.body?.string() }.getOrNull()
+                    val code = response?.code
+                    val msg = buildString {
+                        append(t.message ?: t.javaClass.simpleName)
+                        if (code != null) append(" (HTTP $code)")
+                        if (!body.isNullOrBlank()) append(" · $body")
+                    }
+                    Log.e(TAG, "WebSocket failure: $msg", t)
+                    fail(msg)
+                }
+
+                override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                    Log.i(TAG, "WebSocket closing: $code $reason")
+                    if (!intentionalClose.get() && !setupComplete.get()) {
+                        fail("连接在 setup 完成前关闭: $code ${reason.ifBlank { "(no reason)" }}")
+                    }
+                    webSocket.close(code, reason)
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.i(TAG, "WebSocket closed: $code $reason")
-                    if (!intentionalClose.get()) {
-                        _connectionState.value = ConnectionState.Closed
-                    } else {
+                    if (intentionalClose.get()) {
                         _connectionState.value = ConnectionState.Idle
+                        return
+                    }
+                    if (!setupComplete.get() && _connectionState.value !is ConnectionState.Failed) {
+                        fail("连接关闭: $code ${reason.ifBlank { "(no reason)" }}")
+                    } else if (_connectionState.value !is ConnectionState.Failed) {
+                        _connectionState.value = ConnectionState.Closed
                     }
                 }
             },
@@ -125,39 +191,31 @@ class LiveTranslateClient {
     }
 
     /**
-     * Lightweight connectivity check used by Settings "Test connection".
-     * Connects, waits for setupComplete (or error), then closes.
+     * Settings "连接测试": wait for setupComplete or a concrete error.
      */
-    suspend fun testConnection(config: SessionConfig, timeoutMs: Long = 12_000): Result<String> {
-        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val done = AtomicBoolean(false)
-            fun complete(result: Result<String>) {
-                if (done.compareAndSet(false, true)) {
-                    close()
-                    cont.resume(result) {}
-                }
-            }
-
-            val job = scope.launch {
-                events.collect { event ->
-                    when (event) {
-                        is LiveEvent.SetupComplete -> complete(Result.success("连接成功，会话已建立"))
-                        is LiveEvent.Error -> complete(Result.failure(Exception(event.message)))
-                        else -> Unit
+    suspend fun testConnection(config: SessionConfig, timeoutMs: Long = 20_000): Result<String> {
+        // Ensure a fresh collector sees all events: use first() on filtered flow after connect start.
+        connect(config)
+        val event = withTimeoutOrNull(timeoutMs) {
+            events.first { it is LiveEvent.SetupComplete || it is LiveEvent.Error }
+        }
+        return try {
+            when (event) {
+                is LiveEvent.SetupComplete -> Result.success("连接成功：setupComplete 已收到")
+                is LiveEvent.Error -> Result.failure(Exception(event.message))
+                null -> {
+                    val state = _connectionState.value
+                    val detail = when (state) {
+                        is ConnectionState.Failed -> state.message
+                        is ConnectionState.Connecting -> "一直处于 Connecting，未收到 setupComplete（检查网络/代理是否可达 Google）"
+                        else -> "超时 ${timeoutMs}ms，状态=$state"
                     }
+                    Result.failure(Exception(detail))
                 }
+                else -> Result.failure(Exception("未知响应: $event"))
             }
-
-            connect(config)
-            scope.launch {
-                kotlinx.coroutines.delay(timeoutMs)
-                complete(Result.failure(Exception("连接超时（${timeoutMs}ms）")))
-            }
-
-            cont.invokeOnCancellation {
-                job.cancel()
-                close()
-            }
+        } finally {
+            close()
         }
     }
 
@@ -182,25 +240,48 @@ class LiveTranslateClient {
     }
 
     fun close() {
-        intentionalClose.set(true)
-        setupComplete.set(false)
-        receiveJob?.cancel()
-        webSocket?.close(1000, "client close")
-        webSocket = null
-        if (_connectionState.value !is ConnectionState.Failed) {
-            _connectionState.value = ConnectionState.Idle
-        }
+        closeInternal(intentional = true, notify = true)
     }
 
     fun destroy() {
         close()
         scope.cancel()
-        client.dispatcher.executorService.shutdown()
+        // Do not shutdown shared client dispatcher aggressively if reused; create per-instance is fine.
+        runCatching {
+            client.dispatcher.executorService.shutdown()
+        }
+    }
+
+    private fun closeInternal(intentional: Boolean, notify: Boolean) {
+        intentionalClose.set(intentional)
+        setupComplete.set(false)
+        val ws = webSocket
+        webSocket = null
+        if (ws != null) {
+            runCatching { ws.close(1000, "client close") }
+            runCatching { ws.cancel() }
+        }
+        if (notify && _connectionState.value !is ConnectionState.Failed) {
+            _connectionState.value = ConnectionState.Idle
+        }
+    }
+
+    private fun fail(message: String) {
+        _connectionState.value = ConnectionState.Failed(message)
+        scope.launch { _events.emit(LiveEvent.Error(message)) }
+    }
+
+    private fun emitDebug(message: String) {
+        scope.launch { _events.emit(LiveEvent.Debug(message)) }
     }
 
     private fun handleMessage(text: String) {
+        if (text.isBlank()) return
+        Log.d(TAG, "← ${text.take(500)}")
         try {
             val root = JSONObject(text)
+
+            // setupComplete may be empty object: { "setupComplete": {} }
             if (root.has("setupComplete") || root.has("setup_complete")) {
                 setupComplete.set(true)
                 _connectionState.value = ConnectionState.Ready
@@ -210,9 +291,19 @@ class LiveTranslateClient {
 
             if (root.has("error")) {
                 val err = root.optJSONObject("error")
-                val message = err?.optString("message") ?: root.toString()
-                _connectionState.value = ConnectionState.Failed(message)
-                scope.launch { _events.emit(LiveEvent.Error(message)) }
+                val message = buildString {
+                    if (err != null) {
+                        val code = err.opt("code")
+                        val status = err.optString("status")
+                        val msg = err.optString("message")
+                        if (code != null) append("[$code] ")
+                        if (status.isNotBlank()) append("$status: ")
+                        append(msg.ifBlank { err.toString() })
+                    } else {
+                        append(root.toString())
+                    }
+                }
+                fail(message)
                 return
             }
 
@@ -229,8 +320,8 @@ class LiveTranslateClient {
                         _events.emit(
                             LiveEvent.InputTranscript(
                                 text = t,
-                                languageCode = input.optString("languageCode", null)
-                                    ?: input.optString("language_code", null),
+                                languageCode = input.optStringOrNull("languageCode")
+                                    ?: input.optStringOrNull("language_code"),
                             ),
                         )
                     }
@@ -246,8 +337,8 @@ class LiveTranslateClient {
                         _events.emit(
                             LiveEvent.OutputTranscript(
                                 text = t,
-                                languageCode = output.optString("languageCode", null)
-                                    ?: output.optString("language_code", null),
+                                languageCode = output.optStringOrNull("languageCode")
+                                    ?: output.optStringOrNull("language_code"),
                             ),
                         )
                     }
@@ -265,41 +356,65 @@ class LiveTranslateClient {
                         ?: continue
                     val dataB64 = inline.optString("data")
                     if (dataB64.isBlank()) continue
-                    val mime = inline.optString("mimeType", null)
-                        ?: inline.optString("mime_type", null)
+                    val mime = inline.optStringOrNull("mimeType")
+                        ?: inline.optStringOrNull("mime_type")
                     val bytes = Base64.decode(dataB64, Base64.DEFAULT)
                     scope.launch { _events.emit(LiveEvent.AudioChunk(bytes, mime)) }
                 }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to parse message: ${e.message}")
+            emitDebug("解析消息失败: ${e.message}")
         }
     }
 
+    /**
+     * Build setup message matching google-genai mldev converter:
+     * - responseModalities + translationConfig → generationConfig
+     * - input/output transcription → setup top-level
+     */
     private fun buildSetupMessage(config: SessionConfig): String {
+        val model = config.modelId.trim().removePrefix("models/")
+        val target = config.targetLanguageCode.trim().ifBlank { "zh-Hans" }
+
         val generationConfig = JSONObject()
             .put("responseModalities", JSONArray().put("AUDIO"))
-            .put("inputAudioTranscription", JSONObject())
-            .put("outputAudioTranscription", JSONObject())
             .put(
                 "translationConfig",
                 JSONObject()
-                    .put("targetLanguageCode", config.targetLanguageCode)
+                    .put("targetLanguageCode", target)
                     .put("echoTargetLanguage", config.echoTargetLanguage),
             )
 
-        // Some gateways expect snake_case — send camelCase per official JS docs.
         val setup = JSONObject()
-            .put("model", "models/${config.modelId.removePrefix("models/")}")
+            .put("model", "models/$model")
             .put("generationConfig", generationConfig)
+            .put("inputAudioTranscription", JSONObject())
+            .put("outputAudioTranscription", JSONObject())
 
         return JSONObject().put("setup", setup).toString()
     }
 
     private fun buildUrl(endpoint: String, apiKey: String): String {
-        val base = endpoint.trim()
+        var base = endpoint.trim()
+        // Strip trailing spaces / accidental quotes from paste
+        base = base.trim('"', '\'')
+        // If user pasted a full URL that already has key=, leave it (but prefer our key)
+        if (base.contains("key=")) {
+            // Replace existing key
+            return base.replace(Regex("""([?&]key=)[^&]*"""), "$1$apiKey")
+        }
         val separator = if (base.contains("?")) "&" else "?"
-        return if (base.contains("key=")) base else "$base${separator}key=$apiKey"
+        return "$base${separator}key=$apiKey"
+    }
+
+    private fun redactUrl(url: String): String =
+        url.replace(Regex("""([?&]key=)[^&]+"""), "$1***")
+
+    private fun JSONObject.optStringOrNull(name: String): String? {
+        if (!has(name) || isNull(name)) return null
+        val v = optString(name, "")
+        return v.ifBlank { null }
     }
 
     companion object {
