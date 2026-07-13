@@ -247,14 +247,26 @@ fun SettingsScreen(
                 onCheckedChange = { c -> viewModel.update { it.copy(playTranslatedAudio = c) } },
             )
             Text(
-                text = "译音音量 ${(settings.translatedVolume * 100).toInt()}%",
+                text = buildString {
+                    val pct = (settings.translatedVolume * 100).toInt()
+                    append("译音音量 $pct%")
+                    if (settings.translatedVolume > 1f) append("（增强，可能轻微失真）")
+                },
                 fontSize = 13.sp,
             )
             Slider(
-                value = settings.translatedVolume,
-                onValueChange = { v -> viewModel.update { it.copy(translatedVolume = v) } },
-                valueRange = 0f..1f,
+                value = settings.translatedVolume.coerceIn(0f, 2f),
+                onValueChange = { v ->
+                    viewModel.update { it.copy(translatedVolume = v.coerceIn(0f, 2f)) }
+                },
+                // 0–200%：≤100% 走系统音量；>100% 对 PCM 做数字增益
+                valueRange = 0f..2f,
                 modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                text = "可拉过 100%，让译音压过原片外文声。过高可能削波。",
+                fontSize = 12.sp,
+                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.45f),
             )
         }
 
