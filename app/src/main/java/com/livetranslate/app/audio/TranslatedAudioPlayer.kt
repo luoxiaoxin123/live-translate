@@ -24,6 +24,10 @@ class TranslatedAudioPlayer {
     private val enabled = AtomicBoolean(false)
     private val released = AtomicBoolean(false)
 
+    /**
+     * Logical volume: 0.0–1.0 maps to AudioTrack volume;
+     * 1.0–[MAX_VOLUME] applies extra digital gain on PCM (boost above 100%).
+     */
     @Volatile
     private var volume = 0.8f
 
@@ -53,9 +57,16 @@ class TranslatedAudioPlayer {
     }
 
     fun setVolume(value: Float) {
-        volume = value.coerceIn(0f, 1f)
-        runCatching { trackRef.get()?.setVolume(volume) }
+        volume = value.coerceIn(0f, MAX_VOLUME)
+        // Hardware path only goes to 1.0; boost above that is done in software.
+        runCatching { trackRef.get()?.setVolume(trackVolume()) }
     }
+
+    /** AudioTrack API max is 1.0 */
+    private fun trackVolume(): Float = volume.coerceIn(0f, 1f)
+
+    /** Extra digital gain when user sets > 100% */
+    private fun digitalGain(): Float = if (volume > 1f) volume else 1f
 
     /**
      * Enqueue a PCM chunk. Non-blocking for callers.
@@ -101,21 +112,21 @@ class TranslatedAudioPlayer {
             if (!enabled.get()) continue
             try {
                 val track = ensureTrack(sampleRate) ?: continue
+                val toWrite = applyDigitalGainIfNeeded(chunk)
                 var offset = 0
-                while (offset < chunk.size && enabled.get() && !released.get()) {
+                while (offset < toWrite.size && enabled.get() && !released.get()) {
                     val written = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        track.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_NON_BLOCKING)
+                        track.write(toWrite, offset, toWrite.size - offset, AudioTrack.WRITE_NON_BLOCKING)
                     } else {
-                        track.write(chunk, offset, chunk.size - offset)
+                        track.write(toWrite, offset, toWrite.size - offset)
                     }
                     when {
                         written > 0 -> offset += written
                         written == 0 -> {
-                            // Buffer full — brief yield then retry a few times, then drop rest
+                            // Buffer full — brief yield then retry once, then drop rest
                             Thread.sleep(5)
-                            // If still can't write, drop remaining of this chunk
                             val retry = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                track.write(chunk, offset, chunk.size - offset, AudioTrack.WRITE_NON_BLOCKING)
+                                track.write(toWrite, offset, toWrite.size - offset, AudioTrack.WRITE_NON_BLOCKING)
                             } else {
                                 0
                             }
@@ -123,7 +134,6 @@ class TranslatedAudioPlayer {
                             offset += retry
                         }
                         else -> {
-                            // ERROR_INVALID_OPERATION / DEAD_OBJECT etc.
                             Log.w(TAG, "AudioTrack.write error=$written, recreating")
                             releaseTrack()
                             break
@@ -200,7 +210,7 @@ class TranslatedAudioPlayer {
         }
 
         runCatching {
-            track.setVolume(volume)
+            track.setVolume(trackVolume())
             track.play()
         }.onFailure {
             Log.e(TAG, "AudioTrack play failed", it)
@@ -223,6 +233,31 @@ class TranslatedAudioPlayer {
         }
     }
 
+    /**
+     * Scale 16-bit LE PCM samples when logical volume > 1.0.
+     * Hard-clamps to Short range to avoid wrap-around distortion.
+     */
+    private fun applyDigitalGainIfNeeded(chunk: ByteArray): ByteArray {
+        val gain = digitalGain()
+        if (gain <= 1.0001f || chunk.size < 2) return chunk
+        val out = ByteArray(chunk.size)
+        var i = 0
+        while (i + 1 < chunk.size) {
+            val lo = chunk[i].toInt() and 0xFF
+            val hi = chunk[i + 1].toInt()
+            val sample = (hi shl 8) or lo // little-endian signed short via toShort later
+            val signed = sample.toShort().toInt()
+            val boosted = (signed * gain).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            out[i] = (boosted and 0xFF).toByte()
+            out[i + 1] = ((boosted shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        // Odd trailing byte (shouldn't happen for PCM16) — copy as-is
+        if (i < chunk.size) out[i] = chunk[i]
+        return out
+    }
+
     private fun parseSampleRate(mimeType: String?): Int? {
         if (mimeType.isNullOrBlank()) return null
         val match = Regex("rate=(\\d+)").find(mimeType) ?: return null
@@ -233,6 +268,8 @@ class TranslatedAudioPlayer {
         private const val TAG = "TranslatedAudioPlayer"
         private const val DEFAULT_SAMPLE_RATE = 24_000
         private const val MAX_QUEUE_CHUNKS = 32
+        /** 200% — enough to sit above source video without extreme clipping. */
+        const val MAX_VOLUME = 2.0f
         private val STOP_SENTINEL = ByteArray(0)
         private val RECREATE_SENTINEL = ByteArray(1)
     }
