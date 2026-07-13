@@ -13,6 +13,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -159,36 +164,58 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 ) { padding ->
-                    when (tab) {
-                        0 -> SubtitleScreen(
-                            modifier = Modifier.padding(padding),
-                            settings = settings,
-                            session = session,
-                            onSourceLanguage = { code ->
-                                scope.launch { subtitleVm.setSourceLanguage(code) }
-                            },
-                            onTargetLanguage = { code ->
-                                scope.launch { subtitleVm.setTargetLanguage(code) }
-                            },
-                            onStart = { requestStartSubtitle() },
-                            onStop = {
-                                scope.launch {
-                                    runCatching {
-                                        SessionBus.stop()
-                                        SubtitleSessionService.stop(this@MainActivity)
+                    // Compose AnimatedContent — MIUIX has no dedicated tab page transition.
+                    AnimatedContent(
+                        targetState = tab,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(padding),
+                        transitionSpec = {
+                            val forward = targetState > initialState
+                            val duration = 260
+                            if (forward) {
+                                slideInHorizontally(tween(duration)) { it } togetherWith
+                                    slideOutHorizontally(tween(duration)) { -it }
+                            } else {
+                                slideInHorizontally(tween(duration)) { -it } togetherWith
+                                    slideOutHorizontally(tween(duration)) { it }
+                            }
+                        },
+                        label = "main-tab",
+                    ) { page ->
+                        when (page) {
+                            0 -> SubtitleScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                settings = settings,
+                                session = session,
+                                onSourceLanguage = { code ->
+                                    scope.launch { subtitleVm.setSourceLanguage(code) }
+                                },
+                                onTargetLanguage = { code ->
+                                    scope.launch { subtitleVm.setTargetLanguage(code) }
+                                },
+                                onStart = { requestStartSubtitle() },
+                                onStop = {
+                                    scope.launch {
+                                        runCatching {
+                                            SessionBus.stop()
+                                            SubtitleSessionService.stop(this@MainActivity)
+                                        }
                                     }
-                                }
-                            },
-                            onOpenSettings = { tab = 1 },
-                            canDrawOverlays = PermissionUtils.canDrawOverlays(this),
-                        )
-                        else -> SettingsScreen(
-                            modifier = Modifier.padding(padding),
-                            viewModel = settingsVm,
-                            onOpenOverlayPermission = {
-                                startActivity(PermissionUtils.overlaySettingsIntent(this))
-                            },
-                        )
+                                },
+                                onOpenSettings = { tab = 1 },
+                                canDrawOverlays = PermissionUtils.canDrawOverlays(this@MainActivity),
+                            )
+                            else -> SettingsScreen(
+                                modifier = Modifier.fillMaxSize(),
+                                viewModel = settingsVm,
+                                onOpenOverlayPermission = {
+                                    startActivity(
+                                        PermissionUtils.overlaySettingsIntent(this@MainActivity),
+                                    )
+                                },
+                            )
+                        }
                     }
                 }
             }

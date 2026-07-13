@@ -43,14 +43,14 @@ class SettingsViewModel(
         viewModelScope.launch { settingsRepository.update(transform) }
     }
 
-    fun resetOverlayLayout() {
-        viewModelScope.launch { settingsRepository.resetOverlayLayout() }
+    fun resetSubtitleAppearance() {
+        viewModelScope.launch { settingsRepository.resetSubtitleAppearance() }
     }
 
     fun testConnection() {
         viewModelScope.launch {
             _testing.value = true
-            _testResult.value = "测试中…（需能访问 Google，国内网络通常要代理）"
+            _testResult.value = "测试中…"
             val s = settings.value
             val key = _apiKeyDraft.value.ifBlank { apiKeyStore.getApiKey() }.trim()
             if (key.isBlank()) {
@@ -91,7 +91,7 @@ class SettingsViewModel(
                                 msg.contains("Failed to connect", ignoreCase = true) ||
                                 msg.contains("timeout", ignoreCase = true) ||
                                 msg.contains("Connecting", ignoreCase = true) ->
-                                append("提示：多半是手机访问不了 Google。请开系统代理/VPN 后再测。")
+                                append("提示：网络连接失败，请检查网络后重试。")
                             msg.contains("API_KEY", ignoreCase = true) ||
                                 msg.contains("401") ||
                                 msg.contains("403") ||
@@ -101,7 +101,7 @@ class SettingsViewModel(
                                 msg.contains("404") ->
                                 append("提示：模型 ID 可能不对，确认是 gemini-3.5-live-translate-preview")
                             else ->
-                                append("端点默认应为 AI Studio Live WebSocket（见 README）。")
+                                append("提示：请检查端点、模型 ID 与 API Key。")
                         }
                     }
                 },

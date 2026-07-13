@@ -195,12 +195,6 @@ fun SettingsScreen(
                     },
                 )
             }
-
-            Text(
-                text = "国内网络需能访问 Google。连接失败时请检查代理/VPN。",
-                fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-            )
         }
 
         SectionCard {
@@ -232,8 +226,8 @@ fun SettingsScreen(
                 onCheckedChange = { c -> viewModel.update { it.copy(bilingual = c) } },
             )
             TextButton(
-                text = "重置字幕位置与尺寸",
-                onClick = viewModel::resetOverlayLayout,
+                text = "重置字幕外观",
+                onClick = viewModel::resetSubtitleAppearance,
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -281,11 +275,6 @@ fun SettingsScreen(
                 text = "启动字幕时会请求系统录屏授权，用于捕获其它 App 的播放声音。",
                 fontSize = 13.sp,
                 color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.55f),
-            )
-            Text(
-                text = "开源个人项目 · API Key 仅存本机 · v0.1.0",
-                fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.4f),
             )
         }
 
