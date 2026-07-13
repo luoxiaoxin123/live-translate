@@ -52,6 +52,10 @@ class SubtitleOverlayController(
     private var inputText: String = ""
     private var outputText: String = ""
 
+    /** Last known layout line counts — scroll only when a new line is completed. */
+    private var lastInputLineCount = 0
+    private var lastOutputLineCount = 0
+
     private var lastScreenW = 0
     private var lastScreenH = 0
 
@@ -120,11 +124,18 @@ class SubtitleOverlayController(
     }
 
     fun updateSettings(value: UserSettings) {
+        val bilingualChanged = value.bilingual != settings.bilingual
+        val fontChanged = value.fontSizeSp != settings.fontSizeSp
         settings = value
         applySettingsToViews()
         applyLayoutMode()
+        if (bilingualChanged || fontChanged) {
+            // Layout geometry of lines changes — re-baseline counters
+            lastInputLineCount = 0
+            lastOutputLineCount = 0
+        }
         clampAndApply(persist = false, reason = "settings")
-        // After mode switch, re-apply text + scroll
+        // After mode switch, re-apply text + scroll policy
         applyTranscriptsToViews()
     }
 
@@ -409,37 +420,73 @@ class SubtitleOverlayController(
     private fun applyTranscriptsToViews() {
         val inTv = inputView
         val outTv = outputView
-        val inSc = inputScroll
-        val outSc = outputScroll
 
         if (inTv != null) {
             val next = inputText
             if (inTv.text?.toString() != next) {
                 inTv.text = next
-                scrollToBottom(inSc)
+                // Only scroll after layout, and only when line count increases
+                scheduleLineScroll(inTv, inputScroll, isInput = true)
             }
         }
         if (outTv != null) {
             val next = outputText.ifBlank { "…" }
             if (outTv.text?.toString() != next) {
                 outTv.text = next
-                scrollToBottom(outSc)
+                scheduleLineScroll(outTv, outputScroll, isInput = false)
             }
         }
     }
 
-    /** Auto-scroll to the latest line after layout. */
-    private fun scrollToBottom(scrollView: ScrollView?) {
+    /**
+     * Auto-scroll policy: do NOT chase every character.
+     * Only when the TextView's laid-out line count increases (a line filled and wrapped),
+     * scroll so the newest line is visible — typically one line height at a time.
+     */
+    private fun scheduleLineScroll(
+        textView: TextView,
+        scrollView: ScrollView?,
+        isInput: Boolean,
+    ) {
         if (scrollView == null) return
+        textView.post {
+            val layout = textView.layout
+            val lineCount = when {
+                layout != null && layout.lineCount > 0 -> layout.lineCount
+                else -> textView.lineCount
+            }.coerceAtLeast(0)
+
+            val previous = if (isInput) lastInputLineCount else lastOutputLineCount
+
+            // Text shrank (reset / mode switch) — snap baseline, no flashy scroll
+            if (lineCount < previous) {
+                if (isInput) lastInputLineCount = lineCount else lastOutputLineCount = lineCount
+                scrollView.scrollTo(0, 0)
+                return@post
+            }
+
+            // Same line still filling in — keep eyes steady, no scroll
+            if (lineCount <= previous) {
+                return@post
+            }
+
+            // New line(s) completed — scroll so the last line is fully visible
+            if (isInput) lastInputLineCount = lineCount else lastOutputLineCount = lineCount
+            scrollToShowLastLine(textView, scrollView)
+        }
+    }
+
+    private fun scrollToShowLastLine(textView: TextView, scrollView: ScrollView) {
         scrollView.post {
-            // fullScroll is reliable after text layout; post again if content still growing
-            scrollView.fullScroll(View.FOCUS_DOWN)
-            scrollView.post {
-                val child = scrollView.getChildAt(0) ?: return@post
-                val bottom = (child.bottom + scrollView.paddingBottom) - scrollView.height
-                if (bottom > 0) {
-                    scrollView.scrollTo(0, bottom)
-                }
+            val layout = textView.layout ?: return@post
+            if (layout.lineCount <= 0) return@post
+            val last = layout.lineCount - 1
+            val lineBottom = layout.getLineBottom(last)
+            val target = (lineBottom + scrollView.paddingBottom - scrollView.height)
+                .coerceAtLeast(0)
+            // Smooth-ish step: if we only grew by 1 line, this moves ~one line
+            if (target != scrollView.scrollY) {
+                scrollView.smoothScrollTo(0, target)
             }
         }
     }
