@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive icon backdrop; keep light so the PNG art stays clear -->
-    <color name="ic_launcher_background">#F7F7F7</color>
+    <!-- Match near-white corners of icon.png for adaptive icon safe zone -->
+    <color name="ic_launcher_background">#FEFDFC</color>
 </resources>
