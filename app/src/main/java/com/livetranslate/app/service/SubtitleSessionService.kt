@@ -130,26 +130,34 @@ class SubtitleSessionService : Service() {
             overlay = overlayController
             overlayController.show(currentSettings)
 
-            // Live client
+            // Live client — MUST subscribe to events BEFORE connect(), otherwise a fast
+            // setupComplete can be lost (SharedFlow replay=0) and capture never starts.
             val client = LiveTranslateClient()
             liveClient = client
-            client.connect(
-                LiveTranslateClient.SessionConfig(
-                    endpoint = currentSettings.endpoint,
-                    apiKey = apiKey,
-                    modelId = currentSettings.modelId,
-                    targetLanguageCode = currentSettings.targetLanguageCode,
-                    echoTargetLanguage = true,
-                ),
-            )
 
-            // Audio out
             val player = TranslatedAudioPlayer()
             audioPlayer = player
             player.setEnabled(currentSettings.playTranslatedAudio)
             player.setVolume(currentSettings.translatedVolume)
 
             eventsJob = scope.launch {
+                // Also watch connectionState so we recover if SetupComplete event is missed.
+                launch {
+                    client.connectionState.collect { state ->
+                        when (state) {
+                            is LiveTranslateClient.ConnectionState.Ready -> {
+                                if (capturer == null) {
+                                    SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
+                                    startCapture(projection, client)
+                                }
+                            }
+                            is LiveTranslateClient.ConnectionState.Failed -> {
+                                SessionBus.setStatus(SessionBus.Status.Error, state.message)
+                            }
+                            else -> Unit
+                        }
+                    }
+                }
                 client.events.collect { event ->
                     when (event) {
                         is LiveTranslateClient.LiveEvent.SetupComplete -> {
@@ -169,7 +177,6 @@ class SubtitleSessionService : Service() {
                             SessionBus.setPreview(output = text)
                         }
                         is LiveTranslateClient.LiveEvent.AudioChunk -> {
-                            // Enqueue only — never block main with AudioTrack.write
                             if (currentSettings.playTranslatedAudio) {
                                 player.playPcm(event.pcm, event.mimeType)
                             }
@@ -183,6 +190,18 @@ class SubtitleSessionService : Service() {
                     }
                 }
             }
+
+            // Yield so collectors are registered, then connect.
+            kotlinx.coroutines.yield()
+            client.connect(
+                LiveTranslateClient.SessionConfig(
+                    endpoint = currentSettings.endpoint,
+                    apiKey = apiKey,
+                    modelId = currentSettings.modelId,
+                    targetLanguageCode = currentSettings.targetLanguageCode,
+                    echoTargetLanguage = true,
+                ),
+            )
 
             // React to settings changes (style / audio) while running
             settingsJob = scope.launch {

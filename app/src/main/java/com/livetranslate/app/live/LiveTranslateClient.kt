@@ -7,13 +7,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
@@ -125,10 +125,8 @@ class LiveTranslateClient {
         Log.i(TAG, "Connecting (key redacted): ${redactUrl(url)}")
         emitDebug("连接中… ${redactUrl(url)}")
 
-        val request = Request.Builder()
-            .url(url)
-            .header("Content-Type", "application/json")
-            .build()
+        // Do NOT set Content-Type on the WS handshake — some stacks mishandle it.
+        val request = Request.Builder().url(url).build()
 
         webSocket = client.newWebSocket(
             request,
@@ -191,28 +189,39 @@ class LiveTranslateClient {
     }
 
     /**
-     * Settings "连接测试": wait for setupComplete or a concrete error.
+     * Settings "连接测试".
+     *
+     * Important: do NOT wait only on SharedFlow events — setupComplete can arrive
+     * before a collector is registered (replay=0) and get lost, showing a false
+     * "stuck in Connecting". Poll [connectionState] which is always up to date.
      */
-    suspend fun testConnection(config: SessionConfig, timeoutMs: Long = 20_000): Result<String> {
-        // Ensure a fresh collector sees all events: use first() on filtered flow after connect start.
+    suspend fun testConnection(config: SessionConfig, timeoutMs: Long = 25_000): Result<String> {
         connect(config)
-        val event = withTimeoutOrNull(timeoutMs) {
-            events.first { it is LiveEvent.SetupComplete || it is LiveEvent.Error }
-        }
         return try {
-            when (event) {
-                is LiveEvent.SetupComplete -> Result.success("连接成功：setupComplete 已收到")
-                is LiveEvent.Error -> Result.failure(Exception(event.message))
-                null -> {
-                    val state = _connectionState.value
-                    val detail = when (state) {
-                        is ConnectionState.Failed -> state.message
-                        is ConnectionState.Connecting -> "一直处于 Connecting，未收到 setupComplete（检查网络/代理是否可达 Google）"
-                        else -> "超时 ${timeoutMs}ms，状态=$state"
-                    }
-                    Result.failure(Exception(detail))
+            val deadline = System.currentTimeMillis() + timeoutMs
+            while (System.currentTimeMillis() < deadline) {
+                when (val state = _connectionState.value) {
+                    is ConnectionState.Ready ->
+                        return Result.success("连接成功：setupComplete / Ready")
+                    is ConnectionState.Failed ->
+                        return Result.failure(Exception(state.message))
+                    is ConnectionState.Closed ->
+                        return Result.failure(Exception("连接已关闭，未完成 setup"))
+                    else -> delay(40)
                 }
-                else -> Result.failure(Exception("未知响应: $event"))
+            }
+            val state = _connectionState.value
+            val detail = when (state) {
+                is ConnectionState.Failed -> state.message
+                is ConnectionState.Connecting ->
+                    "WebSocket 一直 Connecting：多半连不上 generativelanguage.googleapis.com（网络/代理/防火墙）。端点本身是正确的。"
+                is ConnectionState.Ready -> "连接成功"
+                else -> "超时 ${timeoutMs}ms，状态=$state"
+            }
+            if (state is ConnectionState.Ready) {
+                Result.success(detail)
+            } else {
+                Result.failure(Exception(detail))
             }
         } finally {
             close()
@@ -284,8 +293,12 @@ class LiveTranslateClient {
             // setupComplete may be empty object: { "setupComplete": {} }
             if (root.has("setupComplete") || root.has("setup_complete")) {
                 setupComplete.set(true)
+                // State first (sync) so pollers never miss Ready even if event is dropped.
                 _connectionState.value = ConnectionState.Ready
-                scope.launch { _events.emit(LiveEvent.SetupComplete) }
+                // tryEmit is non-suspending; fall back to launch if buffer full
+                if (!_events.tryEmit(LiveEvent.SetupComplete)) {
+                    scope.launch { _events.emit(LiveEvent.SetupComplete) }
+                }
                 return
             }
 
