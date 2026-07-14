@@ -6,12 +6,6 @@
 
 App 会捕获**其它应用正在播放的声音**（视频、会议等），推到 Live Translate 接口，并在屏幕上显示**可拖动的半透明悬浮字幕**。可选打开**译音**，与原片声音并行播放。
 
-> **0.1 版范围：** 字幕 + 设置。面对面「对话同传」留待后续版本。
-
-**界面：** [MIUIX](https://github.com/compose-miuix-ui/miuix)（Compose）· 灰底 + 白色圆角分组（MIUI 风格）
-
-**许可证：** [Apache License 2.0](LICENSE)
-
 ---
 
 ## 功能
@@ -32,13 +26,12 @@ App 会捕获**其它应用正在播放的声音**（视频、会议等），推
 
 ## 运行要求
 
-### 使用 App（手机）
+### 使用 App
 
 - Android **10 及以上**（API 29，系统内录需要）
-- 网络能访问 **Google**（`generativelanguage.googleapis.com`）
 - [Google AI Studio](https://aistudio.google.com/) 的 API Key
 
-### 从源码编译（电脑）
+### 从源码编译
 
 - JDK **17+**（推荐 21）
 - 工程要求的 Android SDK（compileSdk **37** 等）
@@ -50,25 +43,23 @@ App 会捕获**其它应用正在播放的声音**（视频、会议等），推
 
 ### 1. 安装
 
-- 有正式包时从 [GitHub Releases](../../releases) 安装，**或**
+- 有正式包时从 [GitHub Releases](../../releases) 安装
 - 本地编译 debug 包后安装（见下方 [构建](#构建)）
 
 ### 2. 配置 API
 
 1. 打开 App → **设置**
-2. 填入 **API Key**（尽量使用本机加密存储）
+2. 填入 **API Key**
 3. 默认一般不用改：
    - **端点：**  
      `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`
    - **模型：** `gemini-3.5-live-translate-preview`
 4. 点 **保存并测试连接**
 
-若一直显示 Connecting / 连不上：多半是**手机访问不了 Google**，先解决网络 / 代理 / VPN。默认端点本身与官方文档一致。
-
 ### 3. 启动字幕
 
 1. 打开 **字幕** 页  
-2. 选择 **源语言**、**目标语言**（下次会记住）  
+2. 选择 **源语言**、**目标语言** 
 3. 点 **启动字幕**  
 4. 按提示授权：
    - **显示在其他应用上层**（悬浮窗）
@@ -138,23 +129,6 @@ app/src/main/java/com/livetranslate/app/
 - 部分 App / DRM 内容**禁止**被内录 → 无声音可译  
 - Live Translate 配置以**目标语**为主；源语言选「自动检测」最稳妥  
 - 预览模型与配额可能变化；端点与模型 ID 可在设置中修改  
-- **对话 / 双人同传**不在 0.1 版范围内  
-
----
-
-## 版本与发布
-
-建议：日常提交只做编译检查；正式发版时打 tag（如 `v0.1.0`）再触发打包与 Release。  
-详见 [docs/release-versioning.md](docs/release-versioning.md)。
-
-当前 Gradle 版本：**0.1.0**（`versionCode` 1）。
-
-创建公开 GitHub 仓库后，在下列位置填入地址，设置页「关于」即可点击打开：
-
-```xml
-<!-- app/src/main/res/values/strings.xml -->
-<string name="github_url" translatable="false">https://github.com/你的用户名/仓库名</string>
-```
 
 ---
 
@@ -170,3 +144,9 @@ https://ai.google.dev/gemini-api/docs/live-api/live-translate
 ## 许可
 
 [Apache License 2.0](LICENSE)
+
+---
+
+## 致谢
+
+- [Linux.do](https://linux.do)
