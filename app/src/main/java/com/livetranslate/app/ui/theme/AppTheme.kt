@@ -7,35 +7,31 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-// "Booth blue" — simultaneous-interpretation desk aesthetic
+/**
+ * MIUIX light defaults:
+ * - Scaffold page bg: colorScheme.surface = #F7F7F7 (gray)
+ * - Card fill: colorScheme.surfaceContainer = White
+ * Matches HyperOS/MIUI settings: gray page + white rounded groups.
+ */
 object Booth {
-    val Accent = Color(0xFF2F6BFF)
-    val AccentSoft = Color(0xFFDCE8FF)
-    val Ink = Color(0xFF0F172A)
-    val Mist = Color(0xFFF3F6FB)
+    val Accent = Color(0xFF3482FF) // MIUIX primary default
+    val AccentSoft = Color(0xFFEAF2FF)
     val Success = Color(0xFF0F9F6E)
-    val Danger = Color(0xFFE11D48)
+    val Danger = Color(0xFFE94634)
     val Warning = Color(0xFFD97706)
 }
 
 @Composable
 fun AppTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val colors = if (dark) {
-        darkColorScheme(
-            primary = Booth.Accent,
-            onPrimary = Color.White,
-            primaryVariant = Booth.Accent,
-        )
+    val colors = if (isSystemInDarkTheme()) {
+        darkColorScheme()
     } else {
+        // Keep MIUIX gray surface + white surfaceContainer; only accent stays brand blue.
         lightColorScheme(
             primary = Booth.Accent,
             onPrimary = Color.White,
             primaryVariant = Booth.Accent,
-            background = Booth.Mist,
-            onBackground = Booth.Ink,
-            surface = Color.White,
-            onSurface = Booth.Ink,
+            onTertiaryContainer = Booth.Accent,
         )
     }
     MiuixTheme(colors = colors, content = content)

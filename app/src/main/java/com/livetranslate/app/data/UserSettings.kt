@@ -1,5 +1,8 @@
 package com.livetranslate.app.data
 
+import androidx.annotation.StringRes
+import com.livetranslate.app.R
+
 /**
  * All user-facing settings that are safe to put in DataStore (not the API key).
  */
@@ -19,7 +22,6 @@ data class UserSettings(
     val overlayHeightDp: Int = Defaults.OVERLAY_HEIGHT_DP,
 ) {
     object Defaults {
-        // Official Gemini Live API WebSocket (API key appended at runtime).
         const val ENDPOINT =
             "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
         const val MODEL_ID = "gemini-3.5-live-translate-preview"
@@ -31,7 +33,7 @@ data class UserSettings(
         const val PLAY_TRANSLATED_AUDIO = false
         const val TRANSLATED_VOLUME = 0.8f
         const val OVERLAY_X = 24
-        const val OVERLAY_Y = -1 // -1 means "default ~ lower third"
+        const val OVERLAY_Y = -1
         const val OVERLAY_WIDTH_DP = 360
         const val OVERLAY_HEIGHT_DP = 120
     }
@@ -39,38 +41,39 @@ data class UserSettings(
 
 data class LanguageOption(
     val code: String,
-    val labelZh: String,
+    @StringRes val labelRes: Int,
 )
 
 object SupportedLanguages {
     val targetOptions: List<LanguageOption> = listOf(
-        LanguageOption("zh-Hans", "中文（简体）"),
-        LanguageOption("zh-Hant", "中文（繁体）"),
-        LanguageOption("en", "英语"),
-        LanguageOption("ja", "日语"),
-        LanguageOption("ko", "韩语"),
-        LanguageOption("es", "西班牙语"),
-        LanguageOption("fr", "法语"),
-        LanguageOption("de", "德语"),
-        LanguageOption("ru", "俄语"),
-        LanguageOption("pt-BR", "葡萄牙语（巴西）"),
-        LanguageOption("pt-PT", "葡萄牙语（葡萄牙）"),
-        LanguageOption("it", "意大利语"),
-        LanguageOption("ar", "阿拉伯语"),
-        LanguageOption("hi", "印地语"),
-        LanguageOption("th", "泰语"),
-        LanguageOption("vi", "越南语"),
-        LanguageOption("id", "印尼语"),
-        LanguageOption("tr", "土耳其语"),
-        LanguageOption("pl", "波兰语"),
-        LanguageOption("nl", "荷兰语"),
-        LanguageOption("uk", "乌克兰语"),
+        LanguageOption("zh-Hans", R.string.lang_zh_hans),
+        LanguageOption("zh-Hant", R.string.lang_zh_hant),
+        LanguageOption("en", R.string.lang_en),
+        LanguageOption("ja", R.string.lang_ja),
+        LanguageOption("ko", R.string.lang_ko),
+        LanguageOption("es", R.string.lang_es),
+        LanguageOption("fr", R.string.lang_fr),
+        LanguageOption("de", R.string.lang_de),
+        LanguageOption("ru", R.string.lang_ru),
+        LanguageOption("pt-BR", R.string.lang_pt_br),
+        LanguageOption("pt-PT", R.string.lang_pt_pt),
+        LanguageOption("it", R.string.lang_it),
+        LanguageOption("ar", R.string.lang_ar),
+        LanguageOption("hi", R.string.lang_hi),
+        LanguageOption("th", R.string.lang_th),
+        LanguageOption("vi", R.string.lang_vi),
+        LanguageOption("id", R.string.lang_id),
+        LanguageOption("tr", R.string.lang_tr),
+        LanguageOption("pl", R.string.lang_pl),
+        LanguageOption("nl", R.string.lang_nl),
+        LanguageOption("uk", R.string.lang_uk),
     )
 
     val sourceOptions: List<LanguageOption> = listOf(
-        LanguageOption("auto", "自动检测"),
+        LanguageOption("auto", R.string.lang_auto),
     ) + targetOptions
 
-    fun labelOf(code: String): String =
-        (sourceOptions + targetOptions).firstOrNull { it.code == code }?.labelZh ?: code
+    fun labelResOf(code: String): Int =
+        (sourceOptions + targetOptions).firstOrNull { it.code == code }?.labelRes
+            ?: R.string.lang_en
 }

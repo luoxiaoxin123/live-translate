@@ -36,7 +36,7 @@ class SettingsViewModel(
 
     fun saveApiKey() {
         apiKeyStore.setApiKey(_apiKeyDraft.value)
-        _testResult.value = "API Key 已保存（本地加密）"
+        _testResult.value = "✅"
     }
 
     fun update(transform: (UserSettings) -> UserSettings) {
