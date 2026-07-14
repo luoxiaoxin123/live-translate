@@ -1,78 +1,174 @@
-# 实时翻译（Live Translate）
+# Live Translate
 
-基于 **Google Gemini Live Translate**（`gemini-3.5-live-translate-preview`）的 Android 实时字幕应用。
+[中文文档](README.zh-CN.md)
 
-- **字幕**：捕获手机内其它 App 播放的系统音频 → 实时翻译 → 半透明悬浮字幕  
-- **设置**：自定义 API 端点 / Key / 模型、字号与背景透明度、译音开关与音量  
-- **UI**： [MIUIX](https://github.com/compose-miuix-ui/miuix)（Compose）
+Android app for **real-time subtitles** powered by [Google Gemini Live Translate](https://ai.google.dev/gemini-api/docs/live-api/live-translate) (`gemini-3.5-live-translate-preview`).
 
-> 首版范围：字幕 + 设置。对话同传为后续版本。
+It captures **system playback audio** from other apps (videos, meetings, etc.), streams it to the Live Translate API, and shows a **draggable floating overlay** with the translation. Optional **translated speech** can play alongside the original audio.
 
-## 功能
+> **v0.1 scope:** Subtitles + Settings. Face-to-face conversation mode is planned for later.
 
-| 模块 | 能力 |
-|------|------|
-| 字幕页 | 源/目标语言选择（记忆）、启动/停止、状态与预览 |
-| 悬浮窗 | 细横把手拖动位置、右下角把手缩放框体（不改字号）、双语/仅译文 |
-| 内录 | `MediaProjection` + `AudioPlaybackCapture` → 16 kHz PCM |
-| Live API | WebSocket + `translationConfig`，对齐[官方文档](https://ai.google.dev/gemini-api/docs/live-api/live-translate) |
-| 译音 | 云端返回音频；默认关；与原声并行播放，可调音量 |
-| 连接测试 | 设置页验证端点 / Key / 模型 |
+**UI:** [MIUIX](https://github.com/compose-miuix-ui/miuix) (Compose) · gray page + white rounded cards (MIUI-style)
 
-## 环境要求
+**License:** [Apache License 2.0](LICENSE)
 
-- Android **10+**（API 29，内录 API）
-- JDK 17+
-- Android SDK 37（compileSdk）
-- **能访问 Google 的网络**（`generativelanguage.googleapis.com`）。国内手机通常需要系统级代理/VPN，否则连接测试会失败
-- AI Studio API Key
+---
 
-## 构建
+## Features
+
+| Area | What it does |
+|------|----------------|
+| **Subtitles tab** | Pick source / target language (remembered), start / stop, status + preview |
+| **Floating overlay** | Semi-transparent captions over other apps; thin grabber to move; corner handle to resize (font size unchanged) |
+| **Display modes** | Translation only, or bilingual (source + translation, split with a divider) |
+| **Auto-scroll** | Per pane; scrolls only when a **new line wraps**, not on every character |
+| **System audio capture** | `MediaProjection` + `AudioPlaybackCapture` → 16‑bit PCM @ 16 kHz |
+| **Live API** | WebSocket + `translationConfig` (official Live Translate setup) |
+| **Translated voice** | Off by default; plays in parallel (does not pause the video); volume up to **200%** via digital gain |
+| **Settings** | Custom endpoint / API key / model ID, connection test, font size, background opacity, permissions, About |
+| **Localization** | Follows system language: **Chinese** if the device is Chinese, otherwise **English** |
+
+---
+
+## Requirements
+
+### Run the app (phone)
+
+- Android **10+** (API 29; required for system audio capture)
+- Network that can reach **Google** (`generativelanguage.googleapis.com`)
+- A [Google AI Studio](https://aistudio.google.com/) API key
+
+### Build from source (PC)
+
+- JDK **17+** (21 recommended)
+- Android SDK with **compileSdk 37** / build-tools as in the project
+- Android Studio or command-line Gradle
+
+---
+
+## Install & use
+
+### 1. Install
+
+- Install a release APK from [GitHub Releases](../../releases) when available, **or**
+- Build a debug APK locally (see [Build](#build)) and install it.
+
+### 2. Configure API
+
+1. Open the app → **Settings**
+2. Paste your **API Key** (stored encrypted on device when possible)
+3. Defaults (usually no change needed):
+   - **Endpoint:**  
+     `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`
+   - **Model:** `gemini-3.5-live-translate-preview`
+4. Tap **Save and test connection**
+
+If the test stays on “Connecting”, the phone often **cannot reach Google**. Fix network / proxy / VPN first; the default endpoint is the official one.
+
+### 3. Start subtitles
+
+1. Open the **Subtitles** tab  
+2. Choose **source** and **target** languages (saved for next launch)  
+3. Tap **Start subtitles**  
+4. Grant when prompted:
+   - **Display over other apps** (overlay)
+   - **Screen capture / record** (system audio; Android will show a system dialog)
+5. Play a foreign-language video (or other media). Captions appear in the floating window.
+
+### 4. Overlay tips
+
+- Drag the **thin bar** at the top to move the box  
+- Drag the **corner handle** to resize (does not change font size)  
+- In Settings: font size, black background opacity, bilingual on/off, reset appearance  
+- Optional: enable **Play translated voice** and raise volume above 100% if you want it louder than the original track  
+
+---
+
+## Build
 
 ```bash
-# Windows Git Bash / PowerShell
+# Set JDK if needed (example on Windows Git Bash)
 export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.0.11.10-hotspot"
+
+# SDK path (create local.properties if missing)
+# sdk.dir=C:/Users/YOU/AppData/Local/Android/Sdk
+
 ./gradlew :app:assembleDebug
 ```
 
-用 Android Studio 打开本仓库根目录，配置 SDK 后 Sync & Run。
+APK output:
 
-## 配置
-
-1. 安装 App → **设置**  
-2. 填入 [Google AI Studio](https://aistudio.google.com/) API Key  
-3. 可选：修改端点 / 模型 ID（默认已是官方 Live Translate）  
-4. 点 **连接测试**  
-5. 回到 **字幕** 页选择语言 → **启动字幕** → 授予悬浮窗与录屏权限  
-
-## 项目结构
-
+```text
+app/build/outputs/apk/debug/app-debug.apk
 ```
+
+Or open the **repository root** in Android Studio → Sync → Run.
+
+> If the project path contains non-ASCII characters, `gradle.properties` already sets `android.overridePathCheck=true`.
+
+---
+
+## Project structure
+
+```text
 app/src/main/java/com/livetranslate/app/
-  ui/           # 字幕页、设置页、主题
-  service/      # 前台会话服务
-  overlay/      # 悬浮字幕
-  audio/        # 内录 + 译音播放
-  live/         # Live Translate WebSocket 客户端
-  data/         # DataStore + 加密 API Key
+  ui/           # Subtitles tab, Settings, theme (MIUIX)
+  service/      # Foreground session service
+  overlay/      # Floating caption window
+  audio/        # System capture + translated audio playback
+  live/         # Live Translate WebSocket client
+  data/         # DataStore settings + API key storage
 ```
 
-本地若有 `miuix/` 目录，仅作 UI 参考，**默认不参与构建**（使用 Maven 依赖）。已在 `.gitignore` 中忽略，避免把第三方 monorepo 一并开源。
+A local `miuix/` tree (if present) is for reference only and is **gitignored**. The app depends on MIUIX from **Maven Central**.
 
-## 隐私与安全
+---
 
-- API Key 使用 `EncryptedSharedPreferences` 存于本机  
-- 音频流直连你配置的端点，本项目无自有后端  
-- 开源发布前请勿提交 `local.properties` 或任何密钥  
+## Privacy
 
-## 许可
+- API key is stored on device (`EncryptedSharedPreferences` when available)  
+- Audio is sent only to the endpoint **you** configure (default: Google AI Studio Live API)  
+- This project does **not** ship a backend that collects your key or audio  
+- Do not commit `local.properties`, keys, or keystores  
 
-本项目采用 [Apache License 2.0](LICENSE)。
+---
 
-第三方依赖仍保留各自许可证。UI 使用 [MIUIX](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）。详见 [NOTICE](NOTICE)。
+## Known limitations
 
-## 已知限制
+- Some apps / DRM content **block** playback capture → no audio to translate  
+- Live Translate is driven mainly by **target language**; source “Auto-detect” is the robust default  
+- Preview models and quotas may change; endpoint and model ID are configurable  
+- Conversation / dual-mic “interpreter” mode is **not** in v0.1  
 
-- 部分 DRM / 禁止捕获的 App 可能无声  
-- Live Translate 公开配置以**目标语**为主；源语「自动检测」最稳妥  
-- 预览模型行为与配额可能变化；端点与模型 ID 可在设置中修改  
+---
+
+## Versioning & releases
+
+Suggested flow: day-to-day commits only build; cut a release by tagging `v0.1.0`, etc.  
+See [docs/release-versioning.md](docs/release-versioning.md).
+
+Current app version in Gradle: **0.1.0** (`versionCode` 1).
+
+After you create a public GitHub repo, set the URL in:
+
+```xml
+<!-- app/src/main/res/values/strings.xml -->
+<string name="github_url" translatable="false">https://github.com/YOUR_USER/YOUR_REPO</string>
+```
+
+Settings → About will then show a tappable link.
+
+---
+
+## Third-party
+
+See [NOTICE](NOTICE). Notable dependency: [MIUIX](https://github.com/compose-miuix-ui/miuix) (Apache-2.0).
+
+Live Translate API docs:  
+https://ai.google.dev/gemini-api/docs/live-api/live-translate
+
+---
+
+## License
+
+[Apache License 2.0](LICENSE)
