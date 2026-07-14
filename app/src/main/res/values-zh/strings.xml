@@ -63,7 +63,7 @@
     <string name="settings_about">关于</string>
     <string name="settings_version">版本 %1$s</string>
     <string name="settings_github">GitHub</string>
-    <string name="settings_github_pending">仓库尚未配置 — 创建公开仓库后，把链接填进 strings.xml 的 github_url</string>
+    <string name="settings_github_pending">仓库链接未配置</string>
     <string name="settings_github_open">打开项目仓库</string>
 
     <string name="lang_auto">自动检测</string>

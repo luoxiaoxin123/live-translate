@@ -63,10 +63,9 @@
     <string name="settings_about">About</string>
     <string name="settings_version">Version %1$s</string>
     <string name="settings_github">GitHub</string>
-    <string name="settings_github_pending">Repository not set yet — paste the URL into github_url after you create the public repo</string>
+    <string name="settings_github_pending">Repository URL not configured</string>
     <string name="settings_github_open">Open project repository</string>
-    <!-- Leave empty until the public repo exists. Example: https://github.com/yourname/live-translate -->
-    <string name="github_url" translatable="false"></string>
+    <string name="github_url" translatable="false">https://github.com/luoxiaoxin123/live-translate</string>
 
     <string name="lang_auto">Auto-detect</string>
     <string name="lang_zh_hans">Chinese (Simplified)</string>

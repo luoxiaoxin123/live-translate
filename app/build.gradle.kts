@@ -18,8 +18,9 @@ android {
         applicationId = "com.livetranslate.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        // CI can override: -PVERSION_CODE=2 -PVERSION_NAME=0.1.1
+        versionCode = (findProperty("VERSION_CODE") as String?)?.toIntOrNull() ?: 1
+        versionName = (findProperty("VERSION_NAME") as String?) ?: "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -30,6 +31,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // Open-source CI: ship an installable APK with the debug keystore
+            // until a real upload key is provided via secrets.
+            signingConfig = signingConfigs.getByName("debug")
         }
         debug {
             applicationIdSuffix = ".debug"
