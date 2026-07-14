@@ -1,0 +1,29 @@
+Live Translate
+Copyright 2026 Live Translate contributors
+
+This product is licensed under the Apache License, Version 2.0.
+See the LICENSE file for the full text.
+
+----
+
+This product depends on third-party software, including but not limited to:
+
+Miuix (Compose Multiplatform UI)
+  https://github.com/compose-miuix-ui/miuix
+  Copyright compose-miuix-ui contributors
+  Licensed under the Apache License, Version 2.0
+
+AndroidX / Jetpack libraries
+  Copyright The Android Open Source Project
+  Licensed under the Apache License, Version 2.0
+
+OkHttp
+  Copyright Square, Inc.
+  Licensed under the Apache License, Version 2.0
+
+Kotlin / kotlinx libraries
+  Copyright JetBrains s.r.o. and Kotlin contributors
+  Licensed under the Apache License, Version 2.0
+
+Google Gemini API is a remote service accessed via API keys configured by
+the user; it is not redistributed as source code in this repository.

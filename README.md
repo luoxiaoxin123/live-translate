@@ -67,7 +67,9 @@ app/src/main/java/com/livetranslate/app/
 
 ## 许可
 
-计划开源；请在首次发布时补充 `LICENSE`（建议 Apache-2.0 或 MIT，并注意 MIUIX 为 Apache-2.0）。
+本项目采用 [Apache License 2.0](LICENSE)。
+
+第三方依赖仍保留各自许可证。UI 使用 [MIUIX](https://github.com/compose-miuix-ui/miuix)（Apache-2.0）。详见 [NOTICE](NOTICE)。
 
 ## 已知限制
 
