@@ -20,7 +20,6 @@
     <string name="subtitle_language">语言</string>
     <string name="subtitle_source">源语言</string>
     <string name="subtitle_target">目标语言</string>
-    <string name="subtitle_language_hint">选择会自动记住。Live Translate 以目标语为主；源语言建议用「自动检测」。</string>
     <string name="subtitle_preview">最近预览</string>
     <string name="subtitle_open_settings">字幕样式 / API 设置</string>
     <string name="subtitle_pick_source">选择源语言</string>
@@ -61,6 +60,11 @@
     <string name="settings_permissions">权限</string>
     <string name="settings_open_overlay">打开悬浮窗权限设置</string>
     <string name="settings_permissions_hint">启动字幕时会请求系统录屏授权，用于捕获其它 App 的播放声音。</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_version">版本 %1$s</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_github_pending">仓库尚未配置 — 创建公开仓库后，把链接填进 strings.xml 的 github_url</string>
+    <string name="settings_github_open">打开项目仓库</string>
 
     <string name="lang_auto">自动检测</string>
     <string name="lang_zh_hans">中文（简体）</string>

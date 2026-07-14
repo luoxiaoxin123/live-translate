@@ -194,11 +194,6 @@ fun SubtitleScreen(
                         modifier = Modifier.weight(1f),
                     )
                 }
-                Text(
-                    text = stringResource(R.string.subtitle_language_hint),
-                    fontSize = 12.sp,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                )
             }
         }
 

@@ -20,7 +20,6 @@
     <string name="subtitle_language">Language</string>
     <string name="subtitle_source">Source</string>
     <string name="subtitle_target">Target</string>
-    <string name="subtitle_language_hint">Choices are remembered. Live Translate mainly uses the target language; source works best with Auto-detect.</string>
     <string name="subtitle_preview">Recent preview</string>
     <string name="subtitle_open_settings">Subtitle style / API settings</string>
     <string name="subtitle_pick_source">Select source language</string>
@@ -61,6 +60,13 @@
     <string name="settings_permissions">Permissions</string>
     <string name="settings_open_overlay">Open overlay permission settings</string>
     <string name="settings_permissions_hint">Starting subtitles will request screen-capture permission to record other apps\' audio.</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_github">GitHub</string>
+    <string name="settings_github_pending">Repository not set yet — paste the URL into github_url after you create the public repo</string>
+    <string name="settings_github_open">Open project repository</string>
+    <!-- Leave empty until the public repo exists. Example: https://github.com/yourname/live-translate -->
+    <string name="github_url" translatable="false"></string>
 
     <string name="lang_auto">Auto-detect</string>
     <string name="lang_zh_hans">Chinese (Simplified)</string>

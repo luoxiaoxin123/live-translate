@@ -1,5 +1,7 @@
 package com.livetranslate.app.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.livetranslate.app.BuildConfig
 import com.livetranslate.app.R
 import com.livetranslate.app.ui.components.PageTitle
 import com.livetranslate.app.ui.components.SectionCard
@@ -324,6 +328,53 @@ fun SettingsScreen(
                     fontSize = 13.sp,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
+            }
+        }
+
+        SmallTitle(
+            text = stringResource(R.string.settings_about),
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+        SectionCard {
+            val context = LocalContext.current
+            val githubUrl = stringResource(R.string.github_url).trim()
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
+                    fontSize = 13.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+                Text(
+                    text = stringResource(R.string.settings_github),
+                    fontWeight = FontWeight.Medium,
+                )
+                if (githubUrl.isBlank()) {
+                    Text(
+                        text = stringResource(R.string.settings_github_pending),
+                        fontSize = 13.sp,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    )
+                } else {
+                    Text(
+                        text = githubUrl,
+                        fontSize = 13.sp,
+                        color = Booth.Accent,
+                    )
+                    TextButton(
+                        text = stringResource(R.string.settings_github_open),
+                        onClick = {
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(githubUrl)),
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         }
 
