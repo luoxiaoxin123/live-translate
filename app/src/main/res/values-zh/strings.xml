@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">实时翻译</string>
+    <string name="notification_channel_subtitle">字幕会话</string>
+    <string name="notification_subtitle_running">实时字幕运行中</string>
+    <string name="notification_subtitle_text">正在捕获系统音频并翻译</string>
+    <string name="action_stop">停止</string>
+
+    <string name="tab_subtitle">字幕</string>
+    <string name="tab_settings">设置</string>
+
+    <string name="subtitle_title">实时字幕</string>
+    <string name="subtitle_subtitle">捕获系统内放音频 · Gemini Live Translate</string>
+    <string name="subtitle_hero_title">同传字幕</string>
+    <string name="subtitle_hero_running">悬浮窗运行中</string>
+    <string name="subtitle_hero_idle">一键启动系统内录翻译</string>
+    <string name="subtitle_start">启动字幕</string>
+    <string name="subtitle_stop">停止字幕</string>
+    <string name="subtitle_need_overlay">尚未授予悬浮窗权限，启动时会引导你开启。</string>
+    <string name="subtitle_language">语言</string>
+    <string name="subtitle_source">源语言</string>
+    <string name="subtitle_target">目标语言</string>
+    <string name="subtitle_language_hint">选择会自动记住。Live Translate 以目标语为主；源语言建议用「自动检测」。</string>
+    <string name="subtitle_preview">最近预览</string>
+    <string name="subtitle_open_settings">字幕样式 / API 设置</string>
+    <string name="subtitle_pick_source">选择源语言</string>
+    <string name="subtitle_pick_target">选择目标语言</string>
+    <string name="subtitle_selected">已选</string>
+
+    <string name="status_idle">空闲</string>
+    <string name="status_starting">启动中</string>
+    <string name="status_running">翻译中</string>
+    <string name="status_error">出错</string>
+    <string name="status_stopped">已停止</string>
+
+    <string name="settings_title">设置</string>
+    <string name="settings_subtitle">API、字幕外观与译音</string>
+    <string name="settings_api">API 连接</string>
+    <string name="settings_api_desc">默认对接 Google AI Studio Live Translate。可自定义兼容端点。</string>
+    <string name="settings_endpoint">API 端点</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_model_id">模型 ID</string>
+    <string name="settings_show">显示</string>
+    <string name="settings_hide">隐藏</string>
+    <string name="settings_save_and_test">保存并测试连接</string>
+    <string name="settings_save_key_only">仅保存 API Key</string>
+    <string name="settings_testing">测试中…</string>
+    <string name="settings_appearance">字幕外观</string>
+    <string name="settings_font_size">字体大小 %1$d sp · 系统默认字体</string>
+    <string name="settings_bg_alpha">背景透明度 %1$d%%</string>
+    <string name="settings_bilingual">双语显示</string>
+    <string name="settings_bilingual_on">显示原文 + 译文</string>
+    <string name="settings_bilingual_off">仅显示译文</string>
+    <string name="settings_reset_appearance">重置字幕外观</string>
+    <string name="settings_voice">译音</string>
+    <string name="settings_play_voice">播放译音</string>
+    <string name="settings_play_voice_summary">云端返回的翻译语音；默认关。开启后与原声并行，不暂停视频。</string>
+    <string name="settings_voice_volume">译音音量 %1$d%%</string>
+    <string name="settings_voice_volume_boost">（增强，可能轻微失真）</string>
+    <string name="settings_voice_volume_hint">可拉过 100%，让译音压过原片外文声。过高可能削波。</string>
+    <string name="settings_permissions">权限</string>
+    <string name="settings_open_overlay">打开悬浮窗权限设置</string>
+    <string name="settings_permissions_hint">启动字幕时会请求系统录屏授权，用于捕获其它 App 的播放声音。</string>
+
+    <string name="lang_auto">自动检测</string>
+    <string name="lang_zh_hans">中文（简体）</string>
+    <string name="lang_zh_hant">中文（繁体）</string>
+    <string name="lang_en">英语</string>
+    <string name="lang_ja">日语</string>
+    <string name="lang_ko">韩语</string>
+    <string name="lang_es">西班牙语</string>
+    <string name="lang_fr">法语</string>
+    <string name="lang_de">德语</string>
+    <string name="lang_ru">俄语</string>
+    <string name="lang_pt_br">葡萄牙语（巴西）</string>
+    <string name="lang_pt_pt">葡萄牙语（葡萄牙）</string>
+    <string name="lang_it">意大利语</string>
+    <string name="lang_ar">阿拉伯语</string>
+    <string name="lang_hi">印地语</string>
+    <string name="lang_th">泰语</string>
+    <string name="lang_vi">越南语</string>
+    <string name="lang_id">印尼语</string>
+    <string name="lang_tr">土耳其语</string>
+    <string name="lang_pl">波兰语</string>
+    <string name="lang_nl">荷兰语</string>
+    <string name="lang_uk">乌克兰语</string>
+
+    <string name="msg_need_api_key">请先在设置中填写 API Key</string>
+    <string name="msg_need_permissions">需要麦克风/通知权限</string>
+    <string name="msg_projection_cancelled">用户取消了录屏授权</string>
+    <string name="msg_service_start_failed">启动服务失败：%1$s</string>
+    <string name="msg_start_failed">启动失败：%1$s</string>
+    <string name="msg_requesting_projection">请求录屏权限…</string>
+    <string name="msg_key_saved">API Key 已保存</string>
+</resources>

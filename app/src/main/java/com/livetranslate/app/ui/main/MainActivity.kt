@@ -30,10 +30,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.livetranslate.app.LiveTranslateApp
+import com.livetranslate.app.R
 import com.livetranslate.app.service.SessionBus
 import com.livetranslate.app.service.SubtitleSessionService
 import com.livetranslate.app.ui.settings.SettingsScreen
@@ -49,6 +51,7 @@ import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarDisplayMode
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,10 +84,16 @@ class MainActivity : ComponentActivity() {
                             SubtitleSessionService.start(this, result.resultCode, result.data!!)
                         }.onFailure {
                             Log.e(TAG, "start service failed", it)
-                            SessionBus.setStatus(SessionBus.Status.Error, "启动服务失败：${it.message}")
+                            SessionBus.setStatus(
+                                SessionBus.Status.Error,
+                                getString(R.string.msg_service_start_failed, it.message.orEmpty()),
+                            )
                         }
                     } else {
-                        SessionBus.setStatus(SessionBus.Status.Error, "用户取消了录屏授权")
+                        SessionBus.setStatus(
+                            SessionBus.Status.Error,
+                            getString(R.string.msg_projection_cancelled),
+                        )
                     }
                 }
 
@@ -102,7 +111,10 @@ class MainActivity : ComponentActivity() {
                 ) { granted ->
                     val ok = granted.values.all { it }
                     if (!ok) {
-                        SessionBus.setStatus(SessionBus.Status.Error, "需要麦克风/通知权限")
+                        SessionBus.setStatus(
+                            SessionBus.Status.Error,
+                            getString(R.string.msg_need_permissions),
+                        )
                         return@rememberLauncherForActivityResult
                     }
                     if (!PermissionUtils.canDrawOverlays(this)) {
@@ -116,7 +128,10 @@ class MainActivity : ComponentActivity() {
                 fun requestStartSubtitle() {
                     try {
                         if (!app.apiKeyStore.hasApiKey()) {
-                            SessionBus.setStatus(SessionBus.Status.Error, "请先在设置中填写 API Key")
+                            SessionBus.setStatus(
+                                SessionBus.Status.Error,
+                                getString(R.string.msg_need_api_key),
+                            )
                             tab = 1
                             return
                         }
@@ -141,25 +156,30 @@ class MainActivity : ComponentActivity() {
                         launchProjection(projectionLauncher::launch)
                     } catch (t: Throwable) {
                         Log.e(TAG, "requestStartSubtitle", t)
-                        SessionBus.setStatus(SessionBus.Status.Error, "启动失败：${t.message}")
+                        SessionBus.setStatus(
+                            SessionBus.Status.Error,
+                            getString(R.string.msg_start_failed, t.message.orEmpty()),
+                        )
                     }
                 }
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
+                    // MIUIX: page background is surface (#F7F7F7 gray); cards use surfaceContainer white
+                    containerColor = MiuixTheme.colorScheme.surface,
                     bottomBar = {
                         NavigationBar(mode = NavigationBarDisplayMode.IconAndText) {
                             NavigationBarItem(
                                 selected = tab == 0,
                                 onClick = { tab = 0 },
                                 icon = Icons.Outlined.Subtitles,
-                                label = "字幕",
+                                label = stringResource(R.string.tab_subtitle),
                             )
                             NavigationBarItem(
                                 selected = tab == 1,
                                 onClick = { tab = 1 },
                                 icon = Icons.Outlined.Settings,
-                                label = "设置",
+                                label = stringResource(R.string.tab_settings),
                             )
                         }
                     },
@@ -223,7 +243,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchProjection(launch: (Intent) -> Unit) {
-        SessionBus.setStatus(SessionBus.Status.Starting, "请求录屏权限…")
+        SessionBus.setStatus(
+            SessionBus.Status.Starting,
+            getString(R.string.msg_requesting_projection),
+        )
         val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         launch(mpm.createScreenCaptureIntent())
     }

@@ -23,40 +23,49 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.livetranslate.app.ui.theme.Booth
 import top.yukonga.miuix.kmp.basic.Card
+import top.yukonga.miuix.kmp.basic.CardDefaults
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+/**
+ * White rounded group on gray page — same pattern as MIUIX demo Settings:
+ * Card defaults to surfaceContainer (white) while Scaffold is surface (#F7F7F7).
+ */
 @Composable
 fun SectionCard(
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Card(modifier = modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            content = content,
-        )
-    }
-}
-
-@Composable
-fun SectionLabel(text: String) {
-    Text(
-        text = text.uppercase(),
-        color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.45f),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp),
+        colors = CardDefaults.defaultColors(
+            color = MiuixTheme.colorScheme.surfaceContainer,
+            contentColor = MiuixTheme.colorScheme.onSurfaceContainer,
+        ),
+        cornerRadius = CardDefaults.CornerRadius,
+        content = content,
     )
 }
 
 @Composable
+fun SectionLabel(text: String) {
+    // MIUIX SmallTitle style section caption above / inside groups
+    SmallTitle(text = text)
+}
+
+@Composable
 fun PageTitle(title: String, subtitle: String? = null) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Text(
             text = title,
-            fontSize = 28.sp,
+            fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = MiuixTheme.colorScheme.onBackground,
         )
@@ -64,7 +73,7 @@ fun PageTitle(title: String, subtitle: String? = null) {
             Text(
                 text = subtitle,
                 fontSize = 14.sp,
-                color = MiuixTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
     }
@@ -81,9 +90,9 @@ fun StatusPill(
     val dot: Color
     when (tone) {
         StatusTone.Idle -> {
-            bg = Color(0xFFE8EEF8)
-            fg = Booth.Ink.copy(alpha = 0.7f)
-            dot = Color(0xFF94A3B8)
+            bg = MiuixTheme.colorScheme.secondaryContainer
+            fg = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            dot = MiuixTheme.colorScheme.onSurfaceVariantActions
         }
         StatusTone.Working -> {
             bg = Booth.AccentSoft
@@ -139,7 +148,9 @@ fun SettingSwitchRow(
     onCheckedChange: (Boolean) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
@@ -149,7 +160,7 @@ fun SettingSwitchRow(
             Text(
                 text = summary,
                 fontSize = 12.sp,
-                color = MiuixTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
             )
         }
         Box(modifier = Modifier.width(12.dp))
