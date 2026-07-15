@@ -90,12 +90,15 @@ class SettingsViewModel(
 
             val endpoint = s.endpoint.trim().ifBlank { UserSettings.Defaults.ENDPOINT }
             val modelId = s.modelId.trim().ifBlank { UserSettings.Defaults.MODEL_ID }
+            val targetLang = s.targetLanguageCode.ifBlank { "zh-Hans" }
 
-            var lastError: String? = null
-            var success: String? = null
+            val lines = mutableListOf<String>()
+            var okCount = 0
             for ((i, key) in keys.withIndex()) {
+                val n = i + 1
+                _testResult.value = "测试中… Key $n / ${keys.size}"
                 if (key.length < 16) {
-                    lastError = "Key ${i + 1} 太短"
+                    lines += "❌ Key $n：太短"
                     continue
                 }
                 val client = LiveTranslateClient()
@@ -104,22 +107,26 @@ class SettingsViewModel(
                         endpoint = endpoint,
                         apiKey = key,
                         modelId = modelId,
-                        targetLanguageCode = s.targetLanguageCode.ifBlank { "zh-Hans" },
+                        targetLanguageCode = targetLang,
                     ),
                 )
                 client.destroy()
                 if (result.isSuccess) {
-                    success = "✅ Key ${i + 1} 可用：${result.getOrNull()}"
-                    break
+                    okCount++
+                    lines += "✅ Key $n 可用：${result.getOrNull()}"
+                } else {
+                    lines += "❌ Key $n：${result.exceptionOrNull()?.message.orEmpty()}"
                 }
-                lastError = "Key ${i + 1}：${result.exceptionOrNull()?.message}"
             }
 
-            _testResult.value = success ?: buildString {
-                append("❌ 失败：")
-                append(lastError.orEmpty())
+            _testResult.value = buildString {
+                append(lines.joinToString("\n"))
                 append('\n')
-                append("提示：请检查网络、端点、模型 ID 与 API Key。")
+                when {
+                    okCount == keys.size -> append("全部 ${keys.size} 个 Key 可用")
+                    okCount > 0 -> append("$okCount / ${keys.size} 个 Key 可用")
+                    else -> append("提示：请检查网络、端点、模型 ID 与 API Key。")
+                }
             }
             _testing.value = false
         }
