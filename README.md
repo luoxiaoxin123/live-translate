@@ -4,7 +4,7 @@
 
 Android app for **real-time subtitles** powered by [Google Gemini Live Translate](https://ai.google.dev/gemini-api/docs/live-api/live-translate) (model `gemini-3.5-live-translate-preview`).
 
-The app captures **audio playing in other apps** (videos, meetings, etc.), sends it to the Live Translate API, and shows a **draggable semi-transparent floating overlay**. Optional **translated speech** can play in parallel with the original audio.
+The app can capture **other apps' playback**, the **microphone**, or both, send audio to the Live Translate API, and show a **draggable semi-transparent floating overlay**. Optional **translated speech** can play in parallel with the original audio. After you stop a session, you can export the source and translation as Markdown.
 
 ---
 
@@ -12,14 +12,17 @@ The app captures **audio playing in other apps** (videos, meetings, etc.), sends
 
 | Area | Description |
 |------|-------------|
-| **Subtitles tab** | Source / target language (remembered), start / stop, status and preview |
+| **Subtitles tab** | Source / target language (remembered), audio source, start / stop, status and preview |
+| **Audio source** | Media / microphone / media+mic (remembered; mic-only skips screen-capture permission) |
 | **Floating overlay** | Over other apps; thin top grabber to move; corner handle to resize (font size unchanged) |
 | **Display modes** | Translation only, or bilingual (source + translation with a divider) |
 | **Auto-scroll** | Separate panes for source / translation; **scrolls one line only when a line wraps** |
-| **System audio capture** | `MediaProjection` + `AudioPlaybackCapture` → 16 kHz PCM |
+| **Audio capture** | Media: `MediaProjection` + `AudioPlaybackCapture`; mic: `AudioRecord` → 16 kHz PCM |
 | **Live API** | WebSocket + `translationConfig`, aligned with the official Live Translate docs |
 | **Translated voice** | Off by default; plays in parallel without pausing the video; volume up to **200%** (digital gain) |
-| **Settings** | Custom endpoint / API key / model, connection test, font size and background opacity, permissions, about |
+| **Multiple API keys** | Up to 10 keys; rotate on each session; connection test checks every key |
+| **Export** | After stop, export this session as Markdown to Downloads |
+| **Settings** | Endpoint / keys / model, connection test, font size and background opacity, permissions, about |
 | **Language** | Follows the system: Chinese device language → Chinese UI; otherwise → English |
 
 ---
@@ -49,22 +52,26 @@ The app captures **audio playing in other apps** (videos, meetings, etc.), sends
 ### 2. Configure API
 
 1. Open the app → **Settings**
-2. Enter your **API Key**
+2. Enter one or more **API keys** (up to 10; `+` on the last row adds a field, `−` on non-first rows removes one)
 3. Defaults usually need no change:
    - **Endpoint:**  
      `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent`
    - **Model:** `gemini-3.5-live-translate-preview`
-4. Tap **Save and test connection**
+4. Tap **Save and test connection** (tests every filled-in key)
 
 ### 3. Start subtitles
 
 1. Open the **Subtitles** tab  
 2. Choose **source** and **target** languages  
-3. Tap **Start subtitles**  
-4. Grant when prompted:
+3. Choose **audio source** (media / microphone / both)  
+4. Tap **Start subtitles**  
+5. Grant when prompted:
    - **Display over other apps** (overlay)
-   - **Screen capture / cast** (system audio; system dialog)
-5. Play a foreign-language video or other media; the translation appears in the floating window
+   - **Screen capture / cast** if media is selected  
+   - **Microphone** if mic is selected  
+6. Play foreign-language media or speak into the mic; the translation appears in the floating window  
+
+After you stop, if there is content, use **Export this session as Markdown** on the subtitles tab (saved under Downloads, e.g. `7月15日-14:30-翻译结果.md`).
 
 ### 4. Overlay tips
 
@@ -106,9 +113,10 @@ app/src/main/java/com/livetranslate/app/
   ui/           # Subtitles tab, Settings, theme (MIUIX)
   service/      # Foreground session service
   overlay/      # Floating caption window
-  audio/        # System capture + translated audio playback
+  audio/        # Media capture / mic / mix + translated audio playback
   live/         # Live Translate WebSocket client
-  data/         # DataStore settings + API key storage
+  data/         # DataStore settings + multi API key storage
+  util/         # Session Markdown export, etc.
 ```
 
 A local `miuix/` directory, if present, is for reference only and is **not** part of the default build (listed in `.gitignore`). The app depends on MIUIX from **Maven Central**.
@@ -126,8 +134,9 @@ A local `miuix/` directory, if present, is for reference only and is **not** par
 
 ## Known limitations
 
-- Some apps / DRM content **block** playback capture → nothing to translate  
+- Some apps / DRM content **block** playback capture → nothing to translate in media mode (try microphone)  
 - Live Translate is driven mainly by **target language**; source **Auto-detect** is the most reliable choice  
+- Continuous streams do not align sentence-by-sentence; Markdown export is full source + full translation, not line pairs  
 - Preview models and quotas may change; endpoint and model ID are configurable in Settings  
 
 ---
