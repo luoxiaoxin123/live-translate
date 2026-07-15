@@ -252,13 +252,16 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (!testResult.isNullOrBlank()) {
+                    val resultText = testResult.orEmpty()
+                    val hasOk = resultText.contains("✅")
+                    val hasFail = resultText.contains("❌")
                     Text(
-                        text = testResult.orEmpty(),
+                        text = resultText,
                         fontSize = 13.sp,
                         color = when {
-                            testResult!!.startsWith("✅") -> Booth.Success
-                            testResult!!.startsWith("❌") -> Booth.Danger
-                            else -> MiuixTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                            hasOk && !hasFail -> Booth.Success
+                            hasFail && !hasOk -> Booth.Danger
+                            else -> MiuixTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                         },
                     )
                 }
