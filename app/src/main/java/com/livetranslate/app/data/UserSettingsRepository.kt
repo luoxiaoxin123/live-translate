@@ -29,48 +29,16 @@ class UserSettingsRepository(private val context: Context) {
         val overlayY = intPreferencesKey("overlay_y")
         val overlayWidthDp = intPreferencesKey("overlay_width_dp")
         val overlayHeightDp = intPreferencesKey("overlay_height_dp")
+        val audioSourceMode = stringPreferencesKey("audio_source_mode")
     }
 
     val settings: Flow<UserSettings> = context.dataStore.data.map { prefs ->
-        UserSettings(
-            endpoint = prefs[Keys.endpoint] ?: UserSettings.Defaults.ENDPOINT,
-            modelId = prefs[Keys.modelId] ?: UserSettings.Defaults.MODEL_ID,
-            sourceLanguageCode = prefs[Keys.sourceLanguage] ?: UserSettings.Defaults.SOURCE_LANGUAGE,
-            targetLanguageCode = prefs[Keys.targetLanguage] ?: UserSettings.Defaults.TARGET_LANGUAGE,
-            fontSizeSp = prefs[Keys.fontSizeSp] ?: UserSettings.Defaults.FONT_SIZE_SP,
-            backgroundAlpha = prefs[Keys.backgroundAlpha] ?: UserSettings.Defaults.BACKGROUND_ALPHA,
-            bilingual = prefs[Keys.bilingual] ?: UserSettings.Defaults.BILINGUAL,
-            playTranslatedAudio = prefs[Keys.playTranslatedAudio]
-                ?: UserSettings.Defaults.PLAY_TRANSLATED_AUDIO,
-            translatedVolume = prefs[Keys.translatedVolume] ?: UserSettings.Defaults.TRANSLATED_VOLUME,
-            overlayX = prefs[Keys.overlayX] ?: UserSettings.Defaults.OVERLAY_X,
-            overlayY = prefs[Keys.overlayY] ?: UserSettings.Defaults.OVERLAY_Y,
-            overlayWidthDp = prefs[Keys.overlayWidthDp] ?: UserSettings.Defaults.OVERLAY_WIDTH_DP,
-            overlayHeightDp = prefs[Keys.overlayHeightDp] ?: UserSettings.Defaults.OVERLAY_HEIGHT_DP,
-        )
+        prefs.toSettings()
     }
 
     suspend fun update(transform: (UserSettings) -> UserSettings) {
         context.dataStore.edit { prefs ->
-            val current = UserSettings(
-                endpoint = prefs[Keys.endpoint] ?: UserSettings.Defaults.ENDPOINT,
-                modelId = prefs[Keys.modelId] ?: UserSettings.Defaults.MODEL_ID,
-                sourceLanguageCode = prefs[Keys.sourceLanguage] ?: UserSettings.Defaults.SOURCE_LANGUAGE,
-                targetLanguageCode = prefs[Keys.targetLanguage] ?: UserSettings.Defaults.TARGET_LANGUAGE,
-                fontSizeSp = prefs[Keys.fontSizeSp] ?: UserSettings.Defaults.FONT_SIZE_SP,
-                backgroundAlpha = prefs[Keys.backgroundAlpha] ?: UserSettings.Defaults.BACKGROUND_ALPHA,
-                bilingual = prefs[Keys.bilingual] ?: UserSettings.Defaults.BILINGUAL,
-                playTranslatedAudio = prefs[Keys.playTranslatedAudio]
-                    ?: UserSettings.Defaults.PLAY_TRANSLATED_AUDIO,
-                translatedVolume = prefs[Keys.translatedVolume]
-                    ?: UserSettings.Defaults.TRANSLATED_VOLUME,
-                overlayX = prefs[Keys.overlayX] ?: UserSettings.Defaults.OVERLAY_X,
-                overlayY = prefs[Keys.overlayY] ?: UserSettings.Defaults.OVERLAY_Y,
-                overlayWidthDp = prefs[Keys.overlayWidthDp] ?: UserSettings.Defaults.OVERLAY_WIDTH_DP,
-                overlayHeightDp = prefs[Keys.overlayHeightDp]
-                    ?: UserSettings.Defaults.OVERLAY_HEIGHT_DP,
-            )
-            val next = transform(current)
+            val next = transform(prefs.toSettings())
             prefs[Keys.endpoint] = next.endpoint
             prefs[Keys.modelId] = next.modelId
             prefs[Keys.sourceLanguage] = next.sourceLanguageCode
@@ -84,6 +52,7 @@ class UserSettingsRepository(private val context: Context) {
             prefs[Keys.overlayY] = next.overlayY
             prefs[Keys.overlayWidthDp] = next.overlayWidthDp
             prefs[Keys.overlayHeightDp] = next.overlayHeightDp
+            prefs[Keys.audioSourceMode] = next.audioSourceMode.name
         }
     }
 
@@ -96,4 +65,22 @@ class UserSettingsRepository(private val context: Context) {
             )
         }
     }
+
+    private fun Preferences.toSettings(): UserSettings = UserSettings(
+        endpoint = this[Keys.endpoint] ?: UserSettings.Defaults.ENDPOINT,
+        modelId = this[Keys.modelId] ?: UserSettings.Defaults.MODEL_ID,
+        sourceLanguageCode = this[Keys.sourceLanguage] ?: UserSettings.Defaults.SOURCE_LANGUAGE,
+        targetLanguageCode = this[Keys.targetLanguage] ?: UserSettings.Defaults.TARGET_LANGUAGE,
+        fontSizeSp = this[Keys.fontSizeSp] ?: UserSettings.Defaults.FONT_SIZE_SP,
+        backgroundAlpha = this[Keys.backgroundAlpha] ?: UserSettings.Defaults.BACKGROUND_ALPHA,
+        bilingual = this[Keys.bilingual] ?: UserSettings.Defaults.BILINGUAL,
+        playTranslatedAudio = this[Keys.playTranslatedAudio]
+            ?: UserSettings.Defaults.PLAY_TRANSLATED_AUDIO,
+        translatedVolume = this[Keys.translatedVolume] ?: UserSettings.Defaults.TRANSLATED_VOLUME,
+        overlayX = this[Keys.overlayX] ?: UserSettings.Defaults.OVERLAY_X,
+        overlayY = this[Keys.overlayY] ?: UserSettings.Defaults.OVERLAY_Y,
+        overlayWidthDp = this[Keys.overlayWidthDp] ?: UserSettings.Defaults.OVERLAY_WIDTH_DP,
+        overlayHeightDp = this[Keys.overlayHeightDp] ?: UserSettings.Defaults.OVERLAY_HEIGHT_DP,
+        audioSourceMode = AudioSourceMode.fromStorage(this[Keys.audioSourceMode]),
+    )
 }
