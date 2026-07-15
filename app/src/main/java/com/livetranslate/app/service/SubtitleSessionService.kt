@@ -15,8 +15,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.livetranslate.app.LiveTranslateApp
 import com.livetranslate.app.R
+import com.livetranslate.app.audio.MicAudioCapturer
+import com.livetranslate.app.audio.PcmMixer
 import com.livetranslate.app.audio.SystemAudioCapturer
 import com.livetranslate.app.audio.TranslatedAudioPlayer
+import com.livetranslate.app.data.AudioSourceMode
 import com.livetranslate.app.data.UserSettings
 import com.livetranslate.app.live.LiveTranslateClient
 import com.livetranslate.app.overlay.SubtitleOverlayController
@@ -29,16 +32,19 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 
 /**
- * Single foreground service: MediaProjection capture + Live WS + floating overlay.
+ * Foreground session: audio capture (media / mic / both) + Live WS + floating overlay.
  */
 class SubtitleSessionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val ioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var mediaProjection: MediaProjection? = null
-    private var capturer: SystemAudioCapturer? = null
+    private var mediaCapturer: SystemAudioCapturer? = null
+    private var micCapturer: MicAudioCapturer? = null
+    private var pcmMixer: PcmMixer? = null
     private var liveClient: LiveTranslateClient? = null
     private var audioPlayer: TranslatedAudioPlayer? = null
     private var overlay: SubtitleOverlayController? = null
@@ -47,8 +53,13 @@ class SubtitleSessionService : Service() {
     private var commandJob: Job? = null
 
     private var currentSettings: UserSettings = UserSettings()
+    private var audioSourceMode: AudioSourceMode = AudioSourceMode.MEDIA
+    private var captureStarted = false
+
     private var accumulatedInput = StringBuilder()
     private var accumulatedOutput = StringBuilder()
+    private var fullInput = StringBuilder()
+    private var fullOutput = StringBuilder()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -70,6 +81,8 @@ class SubtitleSessionService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> {
+                val modeName = intent.getStringExtra(EXTRA_AUDIO_SOURCE)
+                audioSourceMode = AudioSourceMode.fromStorage(modeName)
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
                 val data = if (Build.VERSION.SDK_INT >= 33) {
                     intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
@@ -77,24 +90,33 @@ class SubtitleSessionService : Service() {
                     @Suppress("DEPRECATION")
                     intent.getParcelableExtra(EXTRA_RESULT_DATA)
                 }
-                if (data == null || resultCode != Activity.RESULT_OK) {
-                    SessionBus.setStatus(SessionBus.Status.Error, "录屏授权失败")
-                    stopSelf()
-                    return START_NOT_STICKY
+                if (audioSourceMode.needsMediaProjection) {
+                    if (data == null || resultCode != Activity.RESULT_OK) {
+                        SessionBus.setStatus(SessionBus.Status.Error, "录屏授权失败")
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
+                    startSession(resultCode, data)
+                } else {
+                    startSession(resultCode = null, data = null)
                 }
-                startSession(resultCode, data)
             }
         }
         return START_STICKY
     }
 
-    private fun startSession(resultCode: Int, data: Intent) {
+    private fun startSession(resultCode: Int?, data: Intent?) {
         SessionBus.setStatus(SessionBus.Status.Starting, "正在启动…")
+        SessionBus.clearExport()
+        accumulatedInput.clear()
+        accumulatedOutput.clear()
+        fullInput.clear()
+        fullOutput.clear()
+        captureStarted = false
         startAsForeground()
 
         val app = application as LiveTranslateApp
-        val apiKey = app.apiKeyStore.getApiKey()
-        if (apiKey.isBlank()) {
+        if (!app.apiKeyStore.hasApiKey()) {
             SessionBus.setStatus(SessionBus.Status.Error, "请先在设置中填写 API Key")
             stopSelf()
             return
@@ -102,24 +124,27 @@ class SubtitleSessionService : Service() {
 
         scope.launch {
             currentSettings = app.settingsRepository.settings.first()
-            val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            val projection = mpm.getMediaProjection(resultCode, data)
-            if (projection == null) {
-                SessionBus.setStatus(SessionBus.Status.Error, "无法创建 MediaProjection")
-                stopSelf()
-                return@launch
-            }
-            mediaProjection = projection
-            projection.registerCallback(
-                object : MediaProjection.Callback() {
-                    override fun onStop() {
-                        stopEverything("录屏权限已撤销")
-                    }
-                },
-                null,
-            )
+            // audioSourceMode already set from Intent EXTRA in onStartCommand.
 
-            // Overlay
+            if (audioSourceMode.needsMediaProjection) {
+                val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                val projection = mpm.getMediaProjection(resultCode!!, data!!)
+                if (projection == null) {
+                    SessionBus.setStatus(SessionBus.Status.Error, "无法创建 MediaProjection")
+                    stopSelf()
+                    return@launch
+                }
+                mediaProjection = projection
+                projection.registerCallback(
+                    object : MediaProjection.Callback() {
+                        override fun onStop() {
+                            stopEverything("录屏权限已撤销")
+                        }
+                    },
+                    null,
+                )
+            }
+
             val overlayController = SubtitleOverlayController(this@SubtitleSessionService) { x, y, w, h ->
                 ioScope.launch {
                     app.settingsRepository.update {
@@ -130,8 +155,6 @@ class SubtitleSessionService : Service() {
             overlay = overlayController
             overlayController.show(currentSettings)
 
-            // Live client — MUST subscribe to events BEFORE connect(), otherwise a fast
-            // setupComplete can be lost (SharedFlow replay=0) and capture never starts.
             val client = LiveTranslateClient()
             liveClient = client
 
@@ -141,15 +164,12 @@ class SubtitleSessionService : Service() {
             player.setVolume(currentSettings.translatedVolume)
 
             eventsJob = scope.launch {
-                // Also watch connectionState so we recover if SetupComplete event is missed.
                 launch {
                     client.connectionState.collect { state ->
                         when (state) {
                             is LiveTranslateClient.ConnectionState.Ready -> {
-                                if (capturer == null) {
-                                    SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
-                                    startCapture(projection, client)
-                                }
+                                SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
+                                startCapturePipeline(client)
                             }
                             is LiveTranslateClient.ConnectionState.Failed -> {
                                 SessionBus.setStatus(SessionBus.Status.Error, state.message)
@@ -162,16 +182,18 @@ class SubtitleSessionService : Service() {
                     when (event) {
                         is LiveTranslateClient.LiveEvent.SetupComplete -> {
                             SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
-                            startCapture(projection, client)
+                            startCapturePipeline(client)
                         }
                         is LiveTranslateClient.LiveEvent.InputTranscript -> {
                             appendTranscript(accumulatedInput, event.text)
+                            appendFull(fullInput, event.text)
                             val text = accumulatedInput.toString()
                             overlay?.updateTranscripts(input = text, output = null)
                             SessionBus.setPreview(input = text)
                         }
                         is LiveTranslateClient.LiveEvent.OutputTranscript -> {
                             appendTranscript(accumulatedOutput, event.text)
+                            appendFull(fullOutput, event.text)
                             val text = accumulatedOutput.toString()
                             overlay?.updateTranscripts(input = null, output = text)
                             SessionBus.setPreview(output = text)
@@ -191,19 +213,6 @@ class SubtitleSessionService : Service() {
                 }
             }
 
-            // Yield so collectors are registered, then connect.
-            kotlinx.coroutines.yield()
-            client.connect(
-                LiveTranslateClient.SessionConfig(
-                    endpoint = currentSettings.endpoint,
-                    apiKey = apiKey,
-                    modelId = currentSettings.modelId,
-                    targetLanguageCode = currentSettings.targetLanguageCode,
-                    echoTargetLanguage = true,
-                ),
-            )
-
-            // React to settings changes (style / audio) while running
             settingsJob = scope.launch {
                 app.settingsRepository.settings.collectLatest { s ->
                     val prevPlay = currentSettings.playTranslatedAudio
@@ -211,46 +220,106 @@ class SubtitleSessionService : Service() {
                     overlay?.updateSettings(s)
                     player.setEnabled(s.playTranslatedAudio)
                     player.setVolume(s.translatedVolume)
-                    // Turning off mid-session: drop any backlog immediately
                     if (prevPlay && !s.playTranslatedAudio) {
-                        Log.i(TAG, "translated audio disabled — queue cleared by player")
+                        Log.i(TAG, "translated audio disabled")
                     }
                 }
             }
+
+            yield()
+            // Rotate keys: try first available via round-robin start index
+            val key = app.apiKeyStore.nextRotatedKey()
+            if (key.isBlank()) {
+                SessionBus.setStatus(SessionBus.Status.Error, "请先在设置中填写 API Key")
+                stopSelf()
+                return@launch
+            }
+            client.connect(
+                LiveTranslateClient.SessionConfig(
+                    endpoint = currentSettings.endpoint,
+                    apiKey = key,
+                    modelId = currentSettings.modelId,
+                    targetLanguageCode = currentSettings.targetLanguageCode,
+                    echoTargetLanguage = true,
+                ),
+            )
         }
     }
 
-    private fun startCapture(projection: MediaProjection, client: LiveTranslateClient) {
-        if (capturer != null) return
-        val cap = SystemAudioCapturer(ioScope)
-        capturer = cap
+    private fun startCapturePipeline(client: LiveTranslateClient) {
+        if (captureStarted) return
+        captureStarted = true
         try {
-            cap.start(projection) { pcm ->
-                client.sendPcm16le(pcm, 16_000)
+            when (audioSourceMode) {
+                AudioSourceMode.MEDIA -> {
+                    val projection = mediaProjection
+                        ?: throw IllegalStateException("缺少 MediaProjection")
+                    val cap = SystemAudioCapturer(ioScope)
+                    mediaCapturer = cap
+                    cap.start(projection) { pcm -> client.sendPcm16le(pcm, 16_000) }
+                }
+                AudioSourceMode.MIC -> {
+                    val mic = MicAudioCapturer(ioScope)
+                    micCapturer = mic
+                    mic.start { pcm -> client.sendPcm16le(pcm, 16_000) }
+                }
+                AudioSourceMode.MEDIA_AND_MIC -> {
+                    val projection = mediaProjection
+                        ?: throw IllegalStateException("缺少 MediaProjection")
+                    val mixer = PcmMixer { mixed -> client.sendPcm16le(mixed, 16_000) }
+                    pcmMixer = mixer
+                    val media = SystemAudioCapturer(ioScope)
+                    mediaCapturer = media
+                    media.start(projection) { pcm -> mixer.offerMedia(pcm) }
+                    val mic = MicAudioCapturer(ioScope)
+                    micCapturer = mic
+                    mic.start { pcm -> mixer.offerMic(pcm) }
+                }
             }
             SessionBus.setStatus(SessionBus.Status.Running, "翻译中 · 等待声音…")
         } catch (e: Exception) {
             Log.e(TAG, "capture start failed", e)
-            SessionBus.setStatus(SessionBus.Status.Error, e.message ?: "内录启动失败")
-            stopEverything(e.message ?: "内录启动失败")
+            SessionBus.setStatus(SessionBus.Status.Error, e.message ?: "音频采集启动失败")
+            stopEverything(e.message ?: "音频采集启动失败")
         }
     }
 
     private fun appendTranscript(buffer: StringBuilder, chunk: String) {
-        // Live transcripts are often cumulative or partial; keep last ~800 chars.
         if (chunk.length >= buffer.length && chunk.startsWith(buffer.toString())) {
             buffer.clear()
             buffer.append(chunk)
         } else if (buffer.endsWith(chunk)) {
-            // ignore duplicate
+            // ignore
         } else {
-            if (buffer.isNotEmpty() && !buffer.last().isWhitespace() && !chunk.first().isWhitespace()) {
+            if (buffer.isNotEmpty() && !buffer.last().isWhitespace() && chunk.isNotEmpty() &&
+                !chunk.first().isWhitespace()
+            ) {
                 buffer.append(' ')
             }
             buffer.append(chunk)
         }
         if (buffer.length > 800) {
             buffer.delete(0, buffer.length - 800)
+        }
+    }
+
+    private fun appendFull(buffer: StringBuilder, chunk: String) {
+        // Prefer cumulative server rewrites when present
+        if (chunk.length >= buffer.length && buffer.isNotEmpty() && chunk.startsWith(buffer.toString())) {
+            buffer.clear()
+            buffer.append(chunk)
+            return
+        }
+        if (buffer.endsWith(chunk)) return
+        if (buffer.isNotEmpty() && !buffer.last().isWhitespace() && chunk.isNotEmpty() &&
+            !chunk.first().isWhitespace()
+        ) {
+            buffer.append(' ')
+        }
+        buffer.append(chunk)
+        // Cap export size ~200k chars
+        if (buffer.length > 200_000) {
+            buffer.delete(0, buffer.length - 200_000)
         }
     }
 
@@ -271,27 +340,47 @@ class SubtitleSessionService : Service() {
         val notification: Notification = NotificationCompat.Builder(this, LiveTranslateApp.CHANNEL_SUBTITLE)
             .setContentTitle(getString(R.string.notification_subtitle_running))
             .setContentText(getString(R.string.notification_subtitle_text))
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(openPi)
             .addAction(0, getString(R.string.action_stop), stopPi)
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
-            )
+        val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            when (audioSourceMode) {
+                AudioSourceMode.MEDIA ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                AudioSourceMode.MIC ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                AudioSourceMode.MEDIA_AND_MIC ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            }
+        } else {
+            0
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && fgsType != 0) {
+            startForeground(NOTIFICATION_ID, notification, fgsType)
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
     }
 
     private fun stopEverything(message: String) {
-        SessionBus.setStatus(SessionBus.Status.Stopped, message)
-        capturer?.stop()
-        capturer = null
+        val inFull = fullInput.toString()
+        val outFull = fullOutput.toString()
+        if (inFull.isNotBlank() || outFull.isNotBlank()) {
+            SessionBus.markSessionFinished(inFull, outFull, message)
+        } else {
+            SessionBus.setStatus(SessionBus.Status.Stopped, message)
+        }
+        mediaCapturer?.stop()
+        mediaCapturer = null
+        micCapturer?.stop()
+        micCapturer = null
+        pcmMixer?.close()
+        pcmMixer = null
         liveClient?.close()
         liveClient?.destroy()
         liveClient = null
@@ -299,20 +388,29 @@ class SubtitleSessionService : Service() {
         audioPlayer = null
         overlay?.hide()
         overlay = null
-        mediaProjection?.stop()
+        try {
+            mediaProjection?.stop()
+        } catch (_: Exception) {
+        }
         mediaProjection = null
         settingsJob?.cancel()
         eventsJob?.cancel()
+        captureStarted = false
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
-        capturer?.stop()
+        mediaCapturer?.stop()
+        micCapturer?.stop()
+        pcmMixer?.close()
         liveClient?.destroy()
         audioPlayer?.release()
         overlay?.hide()
-        mediaProjection?.stop()
+        try {
+            mediaProjection?.stop()
+        } catch (_: Exception) {
+        }
         scope.cancel()
         ioScope.cancel()
         super.onDestroy()
@@ -325,12 +423,21 @@ class SubtitleSessionService : Service() {
         const val ACTION_STOP = "com.livetranslate.app.action.STOP_SUBTITLE"
         const val EXTRA_RESULT_CODE = "result_code"
         const val EXTRA_RESULT_DATA = "result_data"
+        const val EXTRA_AUDIO_SOURCE = "audio_source"
 
-        fun start(context: Context, resultCode: Int, data: Intent) {
+        fun start(
+            context: Context,
+            audioSource: AudioSourceMode,
+            resultCode: Int? = null,
+            data: Intent? = null,
+        ) {
             val intent = Intent(context, SubtitleSessionService::class.java).apply {
                 action = ACTION_START
-                putExtra(EXTRA_RESULT_CODE, resultCode)
-                putExtra(EXTRA_RESULT_DATA, data)
+                putExtra(EXTRA_AUDIO_SOURCE, audioSource.name)
+                if (resultCode != null && data != null) {
+                    putExtra(EXTRA_RESULT_CODE, resultCode)
+                    putExtra(EXTRA_RESULT_DATA, data)
+                }
             }
             context.startForegroundService(intent)
         }

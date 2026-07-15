@@ -1,10 +1,9 @@
 package com.livetranslate.app.audio
 
-import android.media.AudioAttributes
+import android.annotation.SuppressLint
 import android.media.AudioFormat
-import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
-import android.media.projection.MediaProjection
+import android.media.MediaRecorder
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -13,10 +12,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Captures other apps' media playback via AudioPlaybackCapture (API 29+),
- * then downsamples to 16-bit mono PCM @ 16 kHz for Live Translate.
+ * Captures microphone PCM and resamples to 16 kHz mono LE for Live Translate.
  */
-class SystemAudioCapturer(
+class MicAudioCapturer(
     private val scope: CoroutineScope,
 ) {
     private var audioRecord: AudioRecord? = null
@@ -25,38 +23,25 @@ class SystemAudioCapturer(
     @Volatile
     private var running = false
 
-    fun start(
-        mediaProjection: MediaProjection,
-        onPcm16k: (ByteArray) -> Unit,
-    ) {
+    @SuppressLint("MissingPermission")
+    fun start(onPcm16k: (ByteArray) -> Unit) {
         stop()
-        val captureConfig = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
-
         val sourceRate = 44_100
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val encoding = AudioFormat.ENCODING_PCM_16BIT
         val minBuf = AudioRecord.getMinBufferSize(sourceRate, channelConfig, encoding)
         val bufferSize = (minBuf * 2).coerceAtLeast(sourceRate / 5 * 2)
 
-        val record = AudioRecord.Builder()
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(encoding)
-                    .setSampleRate(sourceRate)
-                    .setChannelMask(channelConfig)
-                    .build(),
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .setAudioPlaybackCaptureConfig(captureConfig)
-            .build()
-
+        val record = AudioRecord(
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            sourceRate,
+            channelConfig,
+            encoding,
+            bufferSize,
+        )
         if (record.state != AudioRecord.STATE_INITIALIZED) {
             record.release()
-            throw IllegalStateException("AudioRecord 初始化失败，无法内录系统音频")
+            throw IllegalStateException("麦克风 AudioRecord 初始化失败")
         }
 
         audioRecord = record
@@ -72,7 +57,7 @@ class SystemAudioCapturer(
                     val pcm16k = resampler.resample(readBuf, n)
                     if (pcm16k.isNotEmpty()) onPcm16k(pcm16k)
                 } else if (n < 0) {
-                    Log.w(TAG, "AudioRecord read error: $n")
+                    Log.w(TAG, "mic read error: $n")
                     break
                 }
             }
@@ -92,6 +77,6 @@ class SystemAudioCapturer(
     }
 
     companion object {
-        private const val TAG = "SystemAudioCapturer"
+        private const val TAG = "MicAudioCapturer"
     }
 }

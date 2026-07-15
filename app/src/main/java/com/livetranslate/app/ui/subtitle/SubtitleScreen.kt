@@ -3,7 +3,6 @@ package com.livetranslate.app.ui.subtitle
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.livetranslate.app.R
+import com.livetranslate.app.data.AudioSourceMode
 import com.livetranslate.app.data.LanguageOption
 import com.livetranslate.app.data.SupportedLanguages
 import com.livetranslate.app.data.UserSettings
@@ -47,7 +47,6 @@ import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private enum class LangPicker { Source, Target }
@@ -58,11 +57,13 @@ fun SubtitleScreen(
     modifier: Modifier = Modifier,
     settings: UserSettings,
     session: SessionBus.UiState,
+    exportMessage: String?,
     onSourceLanguage: (String) -> Unit,
     onTargetLanguage: (String) -> Unit,
+    onAudioSource: (AudioSourceMode) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onExport: () -> Unit,
     canDrawOverlays: Boolean,
 ) {
     val running = session.status == SessionBus.Status.Running ||
@@ -90,7 +91,6 @@ fun SubtitleScreen(
             subtitle = stringResource(R.string.subtitle_subtitle),
         )
 
-        // Primary control group — white card on gray page (MIUI style)
         SectionCard {
             Column(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp),
@@ -197,6 +197,33 @@ fun SubtitleScreen(
             }
         }
 
+        SmallTitle(
+            text = stringResource(R.string.subtitle_audio_source),
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+        SectionCard {
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                AudioSourceRow(
+                    label = stringResource(R.string.audio_source_media),
+                    selected = settings.audioSourceMode == AudioSourceMode.MEDIA,
+                    enabled = !running,
+                    onClick = { onAudioSource(AudioSourceMode.MEDIA) },
+                )
+                AudioSourceRow(
+                    label = stringResource(R.string.audio_source_mic),
+                    selected = settings.audioSourceMode == AudioSourceMode.MIC,
+                    enabled = !running,
+                    onClick = { onAudioSource(AudioSourceMode.MIC) },
+                )
+                AudioSourceRow(
+                    label = stringResource(R.string.audio_source_both),
+                    selected = settings.audioSourceMode == AudioSourceMode.MEDIA_AND_MIC,
+                    enabled = !running,
+                    onClick = { onAudioSource(AudioSourceMode.MEDIA_AND_MIC) },
+                )
+            }
+        }
+
         if (session.outputPreview.isNotBlank() || session.inputPreview.isNotBlank()) {
             SmallTitle(
                 text = stringResource(R.string.subtitle_preview),
@@ -229,13 +256,32 @@ fun SubtitleScreen(
             }
         }
 
-        TextButton(
-            text = stringResource(R.string.subtitle_open_settings),
-            onClick = onOpenSettings,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp),
-        )
+        if (session.canExport && !running) {
+            SectionCard {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Button(
+                        onClick = onExport,
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColorsPrimary(),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.subtitle_export_md),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (!exportMessage.isNullOrBlank()) {
+                        Text(
+                            text = exportMessage,
+                            fontSize = 13.sp,
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        )
+                    }
+                }
+            }
+        }
 
         Spacer(modifier = Modifier.height(24.dp))
     }
@@ -306,6 +352,36 @@ fun SubtitleScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AudioSourceRow(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.weight(1f),
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = when {
+                !enabled -> MiuixTheme.colorScheme.disabledOnSurface
+                selected -> Booth.Accent
+                else -> MiuixTheme.colorScheme.onSurface
+            },
+        )
+        if (selected) {
+            Text(text = "✓", color = Booth.Accent, fontWeight = FontWeight.Bold)
         }
     }
 }

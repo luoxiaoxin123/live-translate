@@ -21,10 +21,17 @@
     <string name="subtitle_source">源语言</string>
     <string name="subtitle_target">目标语言</string>
     <string name="subtitle_preview">最近预览</string>
-    <string name="subtitle_open_settings">字幕样式 / API 设置</string>
     <string name="subtitle_pick_source">选择源语言</string>
     <string name="subtitle_pick_target">选择目标语言</string>
     <string name="subtitle_selected">已选</string>
+    <string name="subtitle_audio_source">声音来源</string>
+    <string name="audio_source_media">媒体音</string>
+    <string name="audio_source_mic">麦克风音</string>
+    <string name="audio_source_both">媒体音 + 麦克风音</string>
+    <string name="subtitle_export_md">导出本次翻译为 Markdown</string>
+    <string name="subtitle_export_ok">已保存到下载：%1$s</string>
+    <string name="subtitle_export_fail">导出失败：%1$s</string>
+    <string name="subtitle_export_empty">没有可导出的内容</string>
 
     <string name="status_idle">空闲</string>
     <string name="status_starting">启动中</string>
@@ -38,11 +45,15 @@
     <string name="settings_api_desc">默认对接 Google AI Studio Live Translate。可自定义兼容端点。</string>
     <string name="settings_endpoint">API 端点</string>
     <string name="settings_api_key">API Key</string>
+    <string name="settings_api_key_n">API Key %1$d</string>
+    <string name="settings_api_keys_hint">最多 10 个 Key，启动会话时按顺序轮询使用。</string>
     <string name="settings_model_id">模型 ID</string>
     <string name="settings_show">显示</string>
     <string name="settings_hide">隐藏</string>
     <string name="settings_save_and_test">保存并测试连接</string>
-    <string name="settings_save_key_only">仅保存 API Key</string>
+    <string name="settings_save_key_only">保存 API Key</string>
+    <string name="settings_add_key">添加</string>
+    <string name="settings_remove_key">删除</string>
     <string name="settings_testing">测试中…</string>
     <string name="settings_appearance">字幕外观</string>
     <string name="settings_font_size">字体大小 %1$d sp · 系统默认字体</string>

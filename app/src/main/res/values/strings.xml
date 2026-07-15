@@ -21,10 +21,17 @@
     <string name="subtitle_source">Source</string>
     <string name="subtitle_target">Target</string>
     <string name="subtitle_preview">Recent preview</string>
-    <string name="subtitle_open_settings">Subtitle style / API settings</string>
     <string name="subtitle_pick_source">Select source language</string>
     <string name="subtitle_pick_target">Select target language</string>
     <string name="subtitle_selected">Selected</string>
+    <string name="subtitle_audio_source">Audio source</string>
+    <string name="audio_source_media">Media</string>
+    <string name="audio_source_mic">Microphone</string>
+    <string name="audio_source_both">Media + Microphone</string>
+    <string name="subtitle_export_md">Export this session as Markdown</string>
+    <string name="subtitle_export_ok">Saved to Downloads: %1$s</string>
+    <string name="subtitle_export_fail">Export failed: %1$s</string>
+    <string name="subtitle_export_empty">Nothing to export</string>
 
     <string name="status_idle">Idle</string>
     <string name="status_starting">Starting</string>
@@ -38,11 +45,15 @@
     <string name="settings_api_desc">Default is Google AI Studio Live Translate. Compatible endpoints are supported.</string>
     <string name="settings_endpoint">API endpoint</string>
     <string name="settings_api_key">API Key</string>
+    <string name="settings_api_key_n">API Key %1$d</string>
+    <string name="settings_api_keys_hint">Add up to 10 keys. Sessions rotate keys in order.</string>
     <string name="settings_model_id">Model ID</string>
     <string name="settings_show">Show</string>
     <string name="settings_hide">Hide</string>
     <string name="settings_save_and_test">Save and test connection</string>
-    <string name="settings_save_key_only">Save API Key only</string>
+    <string name="settings_save_key_only">Save API keys</string>
+    <string name="settings_add_key">Add</string>
+    <string name="settings_remove_key">Remove</string>
     <string name="settings_testing">Testing…</string>
     <string name="settings_appearance">Subtitle appearance</string>
     <string name="settings_font_size">Font size %1$d sp · system default font</string>
