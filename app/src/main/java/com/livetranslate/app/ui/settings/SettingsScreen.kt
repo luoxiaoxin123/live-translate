@@ -4,15 +4,23 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Remove
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -21,6 +29,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -35,6 +44,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.livetranslate.app.BuildConfig
 import com.livetranslate.app.R
+import com.livetranslate.app.data.ApiKeyStore
 import com.livetranslate.app.ui.components.PageTitle
 import com.livetranslate.app.ui.components.SectionCard
 import com.livetranslate.app.ui.components.SettingSwitchRow
@@ -54,7 +64,7 @@ fun SettingsScreen(
     onOpenOverlayPermission: () -> Unit,
 ) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
-    val apiKeyFromVm by viewModel.apiKeyDraft.collectAsStateWithLifecycle()
+    val apiKeyFields by viewModel.apiKeyFields.collectAsStateWithLifecycle()
     val testResult by viewModel.testResult.collectAsStateWithLifecycle()
     val testing by viewModel.testing.collectAsStateWithLifecycle()
 
@@ -63,9 +73,6 @@ fun SettingsScreen(
     }
     var modelField by remember {
         mutableStateOf(TextFieldValue(settings.modelId, TextRange(settings.modelId.length)))
-    }
-    var apiKeyField by remember {
-        mutableStateOf(TextFieldValue(apiKeyFromVm, TextRange(apiKeyFromVm.length)))
     }
     var revealKey by remember { mutableStateOf(false) }
 
@@ -83,20 +90,22 @@ fun SettingsScreen(
             modelHydrated = true
         }
     }
-    LaunchedEffect(apiKeyFromVm) {
-        if (apiKeyField.text.isEmpty() && apiKeyFromVm.isNotEmpty()) {
-            apiKeyField = TextFieldValue(apiKeyFromVm, TextRange(apiKeyFromVm.length))
-        }
-    }
 
-    // Fields sit on white cards — soft gray fill like MIUI preference inputs
+    // Dark-mode safe field colors (explicit text / cursor colors)
+    val scheme = MiuixTheme.colorScheme
     val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedTextColor = scheme.onSurface,
+        unfocusedTextColor = scheme.onSurface,
+        disabledTextColor = scheme.disabledOnSurface,
         focusedBorderColor = Booth.Accent,
-        unfocusedBorderColor = MiuixTheme.colorScheme.outline.copy(alpha = 0.35f),
+        unfocusedBorderColor = scheme.outline.copy(alpha = 0.45f),
         focusedLabelColor = Booth.Accent,
+        unfocusedLabelColor = scheme.onSurfaceVariantSummary,
         cursorColor = Booth.Accent,
-        focusedContainerColor = MiuixTheme.colorScheme.surface,
-        unfocusedContainerColor = MiuixTheme.colorScheme.surface,
+        focusedContainerColor = scheme.surface,
+        unfocusedContainerColor = scheme.surface,
+        focusedPlaceholderColor = scheme.onSurfaceVariantSummary,
+        unfocusedPlaceholderColor = scheme.onSurfaceVariantSummary,
     )
 
     Column(
@@ -137,32 +146,78 @@ fun SettingsScreen(
                     shape = RoundedCornerShape(16.dp),
                     colors = fieldColors,
                 )
-                OutlinedTextField(
-                    value = apiKeyField,
-                    onValueChange = { v ->
-                        apiKeyField = v
-                        viewModel.setApiKeyDraft(v.text)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { androidx.compose.material3.Text(stringResource(R.string.settings_api_key)) },
-                    singleLine = true,
-                    visualTransformation = if (revealKey) {
-                        VisualTransformation.None
-                    } else {
-                        PasswordVisualTransformation()
-                    },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-                    trailingIcon = {
-                        TextButton(
-                            text = stringResource(
-                                if (revealKey) R.string.settings_hide else R.string.settings_show,
-                            ),
-                            onClick = { revealKey = !revealKey },
-                        )
-                    },
-                    shape = RoundedCornerShape(16.dp),
-                    colors = fieldColors,
+
+                Text(
+                    text = stringResource(R.string.settings_api_keys_hint),
+                    fontSize = 12.sp,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 )
+
+                apiKeyFields.forEachIndexed { index, field ->
+                    val isLast = index == apiKeyFields.lastIndex
+                    val canAdd = isLast && apiKeyFields.size < ApiKeyStore.MAX_KEYS
+                    val canRemove = index > 0
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (canAdd) {
+                            IconButton(
+                                onClick = viewModel::addApiKeyField,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Add,
+                                    contentDescription = stringResource(R.string.settings_add_key),
+                                    tint = Booth.Accent,
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.width(40.dp))
+                        }
+                        OutlinedTextField(
+                            value = field,
+                            onValueChange = { v -> viewModel.updateApiKeyField(index, v) },
+                            modifier = Modifier.weight(1f),
+                            label = {
+                                androidx.compose.material3.Text(
+                                    stringResource(R.string.settings_api_key_n, index + 1),
+                                )
+                            },
+                            singleLine = true,
+                            visualTransformation = if (revealKey) {
+                                VisualTransformation.None
+                            } else {
+                                PasswordVisualTransformation()
+                            },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = fieldColors,
+                        )
+                        if (canRemove) {
+                            IconButton(
+                                onClick = { viewModel.removeApiKeyField(index) },
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Remove,
+                                    contentDescription = stringResource(R.string.settings_remove_key),
+                                    tint = Booth.Danger,
+                                )
+                            }
+                        } else {
+                            Spacer(modifier = Modifier.width(40.dp))
+                        }
+                    }
+                }
+
+                TextButton(
+                    text = stringResource(
+                        if (revealKey) R.string.settings_hide else R.string.settings_show,
+                    ),
+                    onClick = { revealKey = !revealKey },
+                )
+
                 OutlinedTextField(
                     value = modelField,
                     onValueChange = { v ->
@@ -177,7 +232,7 @@ fun SettingsScreen(
                 )
                 Button(
                     onClick = {
-                        viewModel.saveApiKey()
+                        viewModel.saveApiKeys()
                         viewModel.testConnection()
                     },
                     enabled = !testing,
@@ -193,7 +248,7 @@ fun SettingsScreen(
                 }
                 TextButton(
                     text = stringResource(R.string.settings_save_key_only),
-                    onClick = viewModel::saveApiKey,
+                    onClick = viewModel::saveApiKeys,
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (!testResult.isNullOrBlank()) {

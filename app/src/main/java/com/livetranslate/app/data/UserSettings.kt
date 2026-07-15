@@ -20,6 +20,7 @@ data class UserSettings(
     val overlayY: Int = Defaults.OVERLAY_Y,
     val overlayWidthDp: Int = Defaults.OVERLAY_WIDTH_DP,
     val overlayHeightDp: Int = Defaults.OVERLAY_HEIGHT_DP,
+    val audioSourceMode: AudioSourceMode = Defaults.AUDIO_SOURCE,
 ) {
     object Defaults {
         const val ENDPOINT =
@@ -36,6 +37,7 @@ data class UserSettings(
         const val OVERLAY_Y = -1
         const val OVERLAY_WIDTH_DP = 360
         const val OVERLAY_HEIGHT_DP = 120
+        val AUDIO_SOURCE: AudioSourceMode = AudioSourceMode.MEDIA
     }
 }
 

@@ -2,6 +2,7 @@ package com.livetranslate.app.ui.main
 
 import android.Manifest
 import android.app.Activity
+import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
@@ -36,6 +37,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.livetranslate.app.LiveTranslateApp
 import com.livetranslate.app.R
+import com.livetranslate.app.data.AudioSourceMode
 import com.livetranslate.app.service.SessionBus
 import com.livetranslate.app.service.SubtitleSessionService
 import com.livetranslate.app.ui.settings.SettingsScreen
@@ -65,7 +67,11 @@ class MainActivity : ComponentActivity() {
                 var tab by remember { mutableIntStateOf(0) }
 
                 val subtitleVm: SubtitleViewModel = viewModel(
-                    factory = SubtitleViewModelFactory(app.settingsRepository, app.apiKeyStore),
+                    factory = SubtitleViewModelFactory(
+                        application as Application,
+                        app.settingsRepository,
+                        app.apiKeyStore,
+                    ),
                 )
                 val settingsVm: SettingsViewModel = viewModel(
                     factory = SettingsViewModelFactory(app.settingsRepository, app.apiKeyStore),
@@ -73,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
                 val session by SessionBus.state.collectAsStateWithLifecycle()
                 val settings by subtitleVm.settings.collectAsStateWithLifecycle()
+                val exportMessage by subtitleVm.exportMessage.collectAsStateWithLifecycle()
 
                 var pendingStart by remember { mutableStateOf(false) }
 
@@ -81,7 +88,12 @@ class MainActivity : ComponentActivity() {
                 ) { result ->
                     if (result.resultCode == Activity.RESULT_OK && result.data != null) {
                         runCatching {
-                            SubtitleSessionService.start(this, result.resultCode, result.data!!)
+                            SubtitleSessionService.start(
+                                this,
+                                audioSource = settings.audioSourceMode,
+                                resultCode = result.resultCode,
+                                data = result.data!!,
+                            )
                         }.onFailure {
                             Log.e(TAG, "start service failed", it)
                             SessionBus.setStatus(
@@ -102,7 +114,7 @@ class MainActivity : ComponentActivity() {
                 ) {
                     if (PermissionUtils.canDrawOverlays(this) && pendingStart) {
                         pendingStart = false
-                        launchProjection(projectionLauncher::launch)
+                        continueStartAfterPermissions(settings.audioSourceMode, projectionLauncher::launch)
                     }
                 }
 
@@ -121,7 +133,7 @@ class MainActivity : ComponentActivity() {
                         pendingStart = true
                         overlayLauncher.launch(PermissionUtils.overlaySettingsIntent(this))
                     } else {
-                        launchProjection(projectionLauncher::launch)
+                        continueStartAfterPermissions(settings.audioSourceMode, projectionLauncher::launch)
                     }
                 }
 
@@ -135,12 +147,19 @@ class MainActivity : ComponentActivity() {
                             tab = 1
                             return
                         }
+                        val mode = settings.audioSourceMode
                         val needed = buildList {
-                            add(Manifest.permission.RECORD_AUDIO)
+                            if (mode.needsMicrophone) {
+                                add(Manifest.permission.RECORD_AUDIO)
+                            }
+                            // Media capture also uses AudioRecord path that may need RECORD_AUDIO on some OEMs
+                            if (mode.needsMediaProjection) {
+                                add(Manifest.permission.RECORD_AUDIO)
+                            }
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                                 add(Manifest.permission.POST_NOTIFICATIONS)
                             }
-                        }.filter {
+                        }.distinct().filter {
                             ContextCompat.checkSelfPermission(this, it) !=
                                 PackageManager.PERMISSION_GRANTED
                         }
@@ -153,7 +172,7 @@ class MainActivity : ComponentActivity() {
                             overlayLauncher.launch(PermissionUtils.overlaySettingsIntent(this))
                             return
                         }
-                        launchProjection(projectionLauncher::launch)
+                        continueStartAfterPermissions(mode, projectionLauncher::launch)
                     } catch (t: Throwable) {
                         Log.e(TAG, "requestStartSubtitle", t)
                         SessionBus.setStatus(
@@ -165,7 +184,6 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(
                     modifier = Modifier.fillMaxSize(),
-                    // MIUIX: page background is surface (#F7F7F7 gray); cards use surfaceContainer white
                     containerColor = MiuixTheme.colorScheme.surface,
                     bottomBar = {
                         NavigationBar(mode = NavigationBarDisplayMode.IconAndText) {
@@ -184,7 +202,6 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                 ) { padding ->
-                    // Compose AnimatedContent — MIUIX has no dedicated tab page transition.
                     AnimatedContent(
                         targetState = tab,
                         modifier = Modifier
@@ -208,11 +225,15 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxSize(),
                                 settings = settings,
                                 session = session,
+                                exportMessage = exportMessage,
                                 onSourceLanguage = { code ->
                                     scope.launch { subtitleVm.setSourceLanguage(code) }
                                 },
                                 onTargetLanguage = { code ->
                                     scope.launch { subtitleVm.setTargetLanguage(code) }
+                                },
+                                onAudioSource = { mode ->
+                                    scope.launch { subtitleVm.setAudioSource(mode) }
                                 },
                                 onStart = { requestStartSubtitle() },
                                 onStop = {
@@ -223,7 +244,7 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                onOpenSettings = { tab = 1 },
+                                onExport = { subtitleVm.exportLastSession() },
                                 canDrawOverlays = PermissionUtils.canDrawOverlays(this@MainActivity),
                             )
                             else -> SettingsScreen(
@@ -242,13 +263,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun launchProjection(launch: (Intent) -> Unit) {
-        SessionBus.setStatus(
-            SessionBus.Status.Starting,
-            getString(R.string.msg_requesting_projection),
-        )
-        val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        launch(mpm.createScreenCaptureIntent())
+    private fun continueStartAfterPermissions(
+        mode: AudioSourceMode,
+        launchProjection: (Intent) -> Unit,
+    ) {
+        if (mode.needsMediaProjection) {
+            SessionBus.setStatus(
+                SessionBus.Status.Starting,
+                getString(R.string.msg_requesting_projection),
+            )
+            val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            launchProjection(mpm.createScreenCaptureIntent())
+        } else {
+            runCatching {
+                SubtitleSessionService.start(this, audioSource = mode)
+            }.onFailure {
+                SessionBus.setStatus(
+                    SessionBus.Status.Error,
+                    getString(R.string.msg_service_start_failed, it.message.orEmpty()),
+                )
+            }
+        }
     }
 
     companion object {
