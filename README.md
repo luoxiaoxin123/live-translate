@@ -2,6 +2,8 @@
 
 [中文文档](README.zh-CN.md)
 
+Looking for a desktop version? Check out the [Windows version of Live Translate](https://github.com/luoxiaoxin123/live-translate-windows).
+
 Android app for **real-time subtitles** powered by [Google Gemini Live Translate](https://ai.google.dev/gemini-api/docs/live-api/live-translate) (model `gemini-3.5-live-translate-preview`).
 
 The app can capture **other apps' playback**, the **microphone**, or both, send audio to the Live Translate API, and show a **draggable semi-transparent floating overlay**. Optional **translated speech** can play in parallel with the original audio. After you stop a session, you can export the source and translation as Markdown.

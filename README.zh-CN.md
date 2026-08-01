@@ -2,6 +2,8 @@
 
 [English](README.md)
 
+想在电脑上使用？欢迎体验[实时翻译 Windows 版](https://github.com/luoxiaoxin123/live-translate-windows)。
+
 基于 [Google Gemini Live Translate](https://ai.google.dev/gemini-api/docs/live-api/live-translate)（模型 `gemini-3.5-live-translate-preview`）的 **Android 实时字幕**应用。
 
 App 可捕获**其它应用正在播放的声音**、**麦克风**或两者混合，推到 Live Translate 接口，并在屏幕上显示**可拖动的半透明悬浮字幕**。可选打开**译音**，与原片声音并行播放。停止后还可把本次原文/译文导出为 Markdown。
