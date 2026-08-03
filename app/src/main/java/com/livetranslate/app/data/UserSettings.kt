@@ -51,6 +51,7 @@ object SupportedLanguages {
         LanguageOption("zh-Hans", R.string.lang_zh_hans),
         LanguageOption("zh-Hant", R.string.lang_zh_hant),
         LanguageOption("en", R.string.lang_en),
+        LanguageOption("fa", R.string.lang_fa),
         LanguageOption("ja", R.string.lang_ja),
         LanguageOption("ko", R.string.lang_ko),
         LanguageOption("es", R.string.lang_es),
