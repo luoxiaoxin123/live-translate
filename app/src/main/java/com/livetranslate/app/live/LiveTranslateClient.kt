@@ -15,7 +15,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -24,6 +23,11 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.EOFException
+import java.net.ConnectException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -153,13 +157,8 @@ class LiveTranslateClient {
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (intentionalClose.get()) return
-                    val body = runCatching { response?.body?.string() }.getOrNull()
-                    val code = response?.code
-                    val msg = buildString {
-                        append(t.message ?: t.javaClass.simpleName)
-                        if (code != null) append(" (HTTP $code)")
-                        if (!body.isNullOrBlank()) append(" · $body")
-                    }
+                    if (_connectionState.value is ConnectionState.Failed) return
+                    val msg = describeFailure(t, response)
                     Log.e(TAG, "WebSocket failure: $msg", t)
                     fail(msg)
                 }
@@ -169,19 +168,24 @@ class LiveTranslateClient {
                     if (!intentionalClose.get() && !setupComplete.get()) {
                         fail("连接在 setup 完成前关闭: $code ${reason.ifBlank { "(no reason)" }}")
                     }
-                    webSocket.close(code, reason)
+                    runCatching { webSocket.close(code, reason) }
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     Log.i(TAG, "WebSocket closed: $code $reason")
                     if (intentionalClose.get()) {
-                        _connectionState.value = ConnectionState.Idle
+                        if (_connectionState.value !is ConnectionState.Failed) {
+                            _connectionState.value = ConnectionState.Idle
+                        }
                         return
                     }
-                    if (!setupComplete.get() && _connectionState.value !is ConnectionState.Failed) {
-                        fail("连接关闭: $code ${reason.ifBlank { "(no reason)" }}")
-                    } else if (_connectionState.value !is ConnectionState.Failed) {
-                        _connectionState.value = ConnectionState.Closed
+                    if (_connectionState.value is ConnectionState.Failed) return
+                    val detail = "$code ${reason.ifBlank { "(no reason)" }}"
+                    if (!setupComplete.get()) {
+                        fail("连接关闭: $detail")
+                    } else {
+                        // Unexpected mid-session close — tear down so capture stops.
+                        fail("连接已断开: $detail")
                     }
                 }
             },
@@ -232,6 +236,7 @@ class LiveTranslateClient {
         val ws = webSocket ?: return
         if (!setupComplete.get()) return
         if (chunk.isEmpty()) return
+        if (_connectionState.value is ConnectionState.Failed) return
 
         val b64 = Base64.encodeToString(chunk, Base64.NO_WRAP)
         val msg = JSONObject()
@@ -245,7 +250,10 @@ class LiveTranslateClient {
                 ),
             )
             .toString()
-        ws.send(msg)
+        val ok = ws.send(msg)
+        if (!ok) {
+            Log.w(TAG, "sendPcm dropped (socket closed or send queue full)")
+        }
     }
 
     fun close() {
@@ -267,7 +275,9 @@ class LiveTranslateClient {
         val ws = webSocket
         webSocket = null
         if (ws != null) {
-            runCatching { ws.close(1000, "client close") }
+            if (intentional) {
+                runCatching { ws.close(1000, "client close") }
+            }
             runCatching { ws.cancel() }
         }
         if (notify && _connectionState.value !is ConnectionState.Failed) {
@@ -275,9 +285,57 @@ class LiveTranslateClient {
         }
     }
 
+    /**
+     * Mark failed, drop the socket so capture cannot keep writing to a dead connection,
+     * and notify listeners. Safe to call multiple times.
+     */
     private fun fail(message: String) {
+        val alreadyFailed = _connectionState.value is ConnectionState.Failed
+        setupComplete.set(false)
+        val ws = webSocket
+        webSocket = null
+        // cancel() only — close() can hang on half-open links after EOF.
+        if (ws != null) {
+            runCatching { ws.cancel() }
+        }
+        if (alreadyFailed) return
         _connectionState.value = ConnectionState.Failed(message)
-        scope.launch { _events.emit(LiveEvent.Error(message)) }
+        // tryEmit first so we still surface Error if the scope is under load
+        if (!_events.tryEmit(LiveEvent.Error(message))) {
+            scope.launch { _events.emit(LiveEvent.Error(message)) }
+        }
+    }
+
+    /**
+     * Map low-level IO exceptions (especially EOFException from abrupt WS close)
+     * to user-facing Chinese messages. Keep HTTP body snippet when present.
+     */
+    private fun describeFailure(t: Throwable, response: Response?): String {
+        val chain = generateSequence(t) { it.cause }.toList()
+        val body = runCatching { response?.body?.string() }.getOrNull()
+        val code = response?.code
+
+        val friendly = when {
+            chain.any { it is EOFException } ||
+                t.message.equals("EOF", ignoreCase = true) ->
+                "与服务器的连接被中断（网络不稳或会话超时），请重试"
+            chain.any { it is SocketTimeoutException } ->
+                "连接超时，请检查网络后重试"
+            chain.any { it is UnknownHostException } ->
+                "无法解析服务器地址，请检查网络或代理"
+            chain.any { it is ConnectException } ->
+                "无法连接服务器，请检查网络"
+            chain.any { it is SocketException } ->
+                "网络连接异常：${t.message ?: "SocketException"}"
+            !t.message.isNullOrBlank() -> t.message!!
+            else -> t.javaClass.simpleName
+        }
+
+        return buildString {
+            append(friendly)
+            if (code != null) append(" (HTTP $code)")
+            if (!body.isNullOrBlank()) append(" · ${body.take(300)}")
+        }
     }
 
     private fun emitDebug(message: String) {

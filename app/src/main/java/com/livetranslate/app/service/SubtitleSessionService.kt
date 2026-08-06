@@ -24,6 +24,7 @@ import com.livetranslate.app.data.UserSettings
 import com.livetranslate.app.live.LiveTranslateClient
 import com.livetranslate.app.overlay.SubtitleOverlayController
 import com.livetranslate.app.ui.main.MainActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,10 +52,14 @@ class SubtitleSessionService : Service() {
     private var settingsJob: Job? = null
     private var eventsJob: Job? = null
     private var commandJob: Job? = null
+    /** Active startSession work; cancelled on stop / re-start to avoid races. */
+    private var sessionJob: Job? = null
 
     private var currentSettings: UserSettings = UserSettings()
     private var audioSourceMode: AudioSourceMode = AudioSourceMode.MEDIA
     private var captureStarted = false
+    /** Re-entrancy guard for stopEverything (Failed event + close can both fire). */
+    private var stopping = false
 
     private var accumulatedInput = StringBuilder()
     private var accumulatedOutput = StringBuilder()
@@ -92,8 +97,7 @@ class SubtitleSessionService : Service() {
                 }
                 if (audioSourceMode.needsMediaProjection) {
                     if (data == null || resultCode != Activity.RESULT_OK) {
-                        SessionBus.setStatus(SessionBus.Status.Error, "录屏授权失败")
-                        stopSelf()
+                        promoteThenExit("录屏授权失败", asError = true)
                         return START_NOT_STICKY
                     }
                     startSession(resultCode, data)
@@ -101,11 +105,60 @@ class SubtitleSessionService : Service() {
                     startSession(resultCode = null, data = null)
                 }
             }
+            else -> {
+                // System may restart a dead FGS with a null/unknown intent.
+                // MediaProjection tokens cannot be recovered — exit cleanly after
+                // a brief startForeground to avoid ForegroundServiceDidNotStartInTimeException.
+                Log.w(TAG, "onStartCommand without ACTION_START (intent=$intent); refusing restart")
+                promoteThenExit("会话被系统回收，请重新开始", asError = false)
+            }
         }
-        return START_STICKY
+        // MediaProjection + live WS cannot be meaningfully restored after process death.
+        return START_NOT_STICKY
+    }
+
+    /**
+     * When we must leave without a full session, still call startForeground first
+     * so the FGS start timeout does not crash the process.
+     *
+     * Avoid claiming [ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION] here:
+     * without a live MediaProjection token that can SecurityException on Android 14+.
+     */
+    private fun promoteThenExit(message: String, asError: Boolean) {
+        val notification = buildNotification()
+        runCatching {
+            when {
+                // SPECIAL_USE is API 34+; use it only when we lack mic/projection rights.
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ->
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+                    )
+                else -> startForeground(NOTIFICATION_ID, notification)
+            }
+        }.recoverCatching {
+            // Last resort: untyped path to satisfy the FGS start timeout.
+            startForeground(NOTIFICATION_ID, notification)
+        }.onFailure {
+            Log.e(TAG, "promoteThenExit startForeground failed", it)
+        }
+        if (asError) {
+            SessionBus.setStatus(SessionBus.Status.Error, message)
+        } else {
+            SessionBus.setStatus(SessionBus.Status.Stopped, message)
+        }
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        stopSelf()
     }
 
     private fun startSession(resultCode: Int?, data: Intent?) {
+        // Cancel any in-flight start and drop previous resources before a new session.
+        sessionJob?.cancel()
+        sessionJob = null
+        releaseSessionResources()
+        stopping = false
+
         SessionBus.setStatus(SessionBus.Status.Starting, "正在启动…")
         SessionBus.clearExport()
         accumulatedInput.clear()
@@ -113,141 +166,168 @@ class SubtitleSessionService : Service() {
         fullInput.clear()
         fullOutput.clear()
         captureStarted = false
-        startAsForeground()
 
-        val app = application as LiveTranslateApp
-        if (!app.apiKeyStore.hasApiKey()) {
-            SessionBus.setStatus(SessionBus.Status.Error, "请先在设置中填写 API Key")
+        try {
+            startAsForeground()
+        } catch (t: Throwable) {
+            Log.e(TAG, "startForeground failed", t)
+            SessionBus.setStatus(
+                SessionBus.Status.Error,
+                t.message?.takeIf { it.isNotBlank() } ?: "无法启动前台服务",
+            )
             stopSelf()
             return
         }
 
-        scope.launch {
-            currentSettings = app.settingsRepository.settings.first()
-            // audioSourceMode already set from Intent EXTRA in onStartCommand.
+        val app = application as LiveTranslateApp
+        if (!app.apiKeyStore.hasApiKey()) {
+            SessionBus.setStatus(SessionBus.Status.Error, "请先在设置中填写 API Key")
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
 
-            if (audioSourceMode.needsMediaProjection) {
-                val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-                val projection = mpm.getMediaProjection(resultCode!!, data!!)
-                if (projection == null) {
-                    SessionBus.setStatus(SessionBus.Status.Error, "无法创建 MediaProjection")
-                    stopSelf()
-                    return@launch
+        sessionJob = scope.launch {
+            try {
+                currentSettings = app.settingsRepository.settings.first()
+
+                if (audioSourceMode.needsMediaProjection) {
+                    val mpm = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+                    val projection = mpm.getMediaProjection(resultCode!!, data!!)
+                    if (projection == null) {
+                        stopEverything("无法创建 MediaProjection", asError = true)
+                        return@launch
+                    }
+                    mediaProjection = projection
+                    projection.registerCallback(
+                        object : MediaProjection.Callback() {
+                            override fun onStop() {
+                                // Handler null → main thread
+                                stopEverything("录屏权限已撤销", asError = true)
+                            }
+                        },
+                        null,
+                    )
                 }
-                mediaProjection = projection
-                projection.registerCallback(
-                    object : MediaProjection.Callback() {
-                        override fun onStop() {
-                            stopEverything("录屏权限已撤销")
-                        }
-                    },
-                    null,
-                )
-            }
 
-            val overlayController = SubtitleOverlayController(this@SubtitleSessionService) { x, y, w, h ->
-                ioScope.launch {
-                    app.settingsRepository.update {
-                        it.copy(overlayX = x, overlayY = y, overlayWidthDp = w, overlayHeightDp = h)
+                val overlayController = SubtitleOverlayController(this@SubtitleSessionService) { x, y, w, h ->
+                    ioScope.launch {
+                        app.settingsRepository.update {
+                            it.copy(overlayX = x, overlayY = y, overlayWidthDp = w, overlayHeightDp = h)
+                        }
                     }
                 }
-            }
-            overlay = overlayController
-            overlayController.show(currentSettings)
+                overlay = overlayController
+                overlayController.show(currentSettings)
 
-            val client = LiveTranslateClient()
-            liveClient = client
+                val client = LiveTranslateClient()
+                liveClient = client
 
-            val player = TranslatedAudioPlayer()
-            audioPlayer = player
-            player.setEnabled(currentSettings.playTranslatedAudio)
-            player.setVolume(currentSettings.translatedVolume)
+                val player = TranslatedAudioPlayer()
+                audioPlayer = player
+                player.setEnabled(currentSettings.playTranslatedAudio)
+                player.setVolume(currentSettings.translatedVolume)
 
-            eventsJob = scope.launch {
-                launch {
-                    client.connectionState.collect { state ->
-                        when (state) {
-                            is LiveTranslateClient.ConnectionState.Ready -> {
+                // Child of sessionJob so cancel(sessionJob) tears these down too.
+                eventsJob = launch {
+                    launch {
+                        client.connectionState.collect { state ->
+                            when (state) {
+                                is LiveTranslateClient.ConnectionState.Ready -> {
+                                    SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
+                                    startCapturePipeline(client)
+                                }
+                                is LiveTranslateClient.ConnectionState.Failed -> {
+                                    // Full teardown: stop capture, close WS resources, leave FGS.
+                                    stopEverything(state.message, asError = true)
+                                }
+                                is LiveTranslateClient.ConnectionState.Closed -> {
+                                    stopEverything("连接已断开", asError = true)
+                                }
+                                else -> Unit
+                            }
+                        }
+                    }
+                    client.events.collect { event ->
+                        when (event) {
+                            is LiveTranslateClient.LiveEvent.SetupComplete -> {
                                 SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
                                 startCapturePipeline(client)
                             }
-                            is LiveTranslateClient.ConnectionState.Failed -> {
-                                SessionBus.setStatus(SessionBus.Status.Error, state.message)
+                            is LiveTranslateClient.LiveEvent.InputTranscript -> {
+                                appendTranscript(accumulatedInput, event.text)
+                                appendFull(fullInput, event.text)
+                                val text = accumulatedInput.toString()
+                                overlay?.updateTranscripts(input = text, output = null)
+                                SessionBus.setPreview(input = text)
                             }
-                            else -> Unit
-                        }
-                    }
-                }
-                client.events.collect { event ->
-                    when (event) {
-                        is LiveTranslateClient.LiveEvent.SetupComplete -> {
-                            SessionBus.setStatus(SessionBus.Status.Running, "翻译中")
-                            startCapturePipeline(client)
-                        }
-                        is LiveTranslateClient.LiveEvent.InputTranscript -> {
-                            appendTranscript(accumulatedInput, event.text)
-                            appendFull(fullInput, event.text)
-                            val text = accumulatedInput.toString()
-                            overlay?.updateTranscripts(input = text, output = null)
-                            SessionBus.setPreview(input = text)
-                        }
-                        is LiveTranslateClient.LiveEvent.OutputTranscript -> {
-                            appendTranscript(accumulatedOutput, event.text)
-                            appendFull(fullOutput, event.text)
-                            val text = accumulatedOutput.toString()
-                            overlay?.updateTranscripts(input = null, output = text)
-                            SessionBus.setPreview(output = text)
-                        }
-                        is LiveTranslateClient.LiveEvent.AudioChunk -> {
-                            if (currentSettings.playTranslatedAudio) {
-                                player.playPcm(event.pcm, event.mimeType)
+                            is LiveTranslateClient.LiveEvent.OutputTranscript -> {
+                                appendTranscript(accumulatedOutput, event.text)
+                                appendFull(fullOutput, event.text)
+                                val text = accumulatedOutput.toString()
+                                overlay?.updateTranscripts(input = null, output = text)
+                                SessionBus.setPreview(output = text)
+                            }
+                            is LiveTranslateClient.LiveEvent.AudioChunk -> {
+                                if (currentSettings.playTranslatedAudio) {
+                                    player.playPcm(event.pcm, event.mimeType)
+                                }
+                            }
+                            is LiveTranslateClient.LiveEvent.Error -> {
+                                // connectionState.Failed also fires; stopEverything is re-entrant-safe.
+                                stopEverything(event.message, asError = true)
+                            }
+                            is LiveTranslateClient.LiveEvent.Debug -> {
+                                Log.d(TAG, event.message)
                             }
                         }
-                        is LiveTranslateClient.LiveEvent.Error -> {
-                            SessionBus.setStatus(SessionBus.Status.Error, event.message)
-                        }
-                        is LiveTranslateClient.LiveEvent.Debug -> {
-                            Log.d(TAG, event.message)
+                    }
+                }
+
+                settingsJob = launch {
+                    app.settingsRepository.settings.collectLatest { s ->
+                        val prevPlay = currentSettings.playTranslatedAudio
+                        currentSettings = s
+                        overlay?.updateSettings(s)
+                        player.setEnabled(s.playTranslatedAudio)
+                        player.setVolume(s.translatedVolume)
+                        if (prevPlay && !s.playTranslatedAudio) {
+                            Log.i(TAG, "translated audio disabled")
                         }
                     }
                 }
-            }
 
-            settingsJob = scope.launch {
-                app.settingsRepository.settings.collectLatest { s ->
-                    val prevPlay = currentSettings.playTranslatedAudio
-                    currentSettings = s
-                    overlay?.updateSettings(s)
-                    player.setEnabled(s.playTranslatedAudio)
-                    player.setVolume(s.translatedVolume)
-                    if (prevPlay && !s.playTranslatedAudio) {
-                        Log.i(TAG, "translated audio disabled")
-                    }
+                yield()
+                if (stopping) return@launch
+
+                val key = app.apiKeyStore.nextRotatedKey()
+                if (key.isBlank()) {
+                    stopEverything("请先在设置中填写 API Key", asError = true)
+                    return@launch
                 }
+                client.connect(
+                    LiveTranslateClient.SessionConfig(
+                        endpoint = currentSettings.endpoint,
+                        apiKey = key,
+                        modelId = currentSettings.modelId,
+                        targetLanguageCode = currentSettings.targetLanguageCode,
+                        echoTargetLanguage = true,
+                    ),
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                Log.e(TAG, "startSession failed", t)
+                stopEverything(
+                    t.message?.takeIf { it.isNotBlank() } ?: "启动失败",
+                    asError = true,
+                )
             }
-
-            yield()
-            // Rotate keys: try first available via round-robin start index
-            val key = app.apiKeyStore.nextRotatedKey()
-            if (key.isBlank()) {
-                SessionBus.setStatus(SessionBus.Status.Error, "请先在设置中填写 API Key")
-                stopSelf()
-                return@launch
-            }
-            client.connect(
-                LiveTranslateClient.SessionConfig(
-                    endpoint = currentSettings.endpoint,
-                    apiKey = key,
-                    modelId = currentSettings.modelId,
-                    targetLanguageCode = currentSettings.targetLanguageCode,
-                    echoTargetLanguage = true,
-                ),
-            )
         }
     }
 
     private fun startCapturePipeline(client: LiveTranslateClient) {
-        if (captureStarted) return
+        if (captureStarted || stopping) return
         captureStarted = true
         try {
             when (audioSourceMode) {
@@ -279,8 +359,7 @@ class SubtitleSessionService : Service() {
             SessionBus.setStatus(SessionBus.Status.Running, "翻译中 · 等待声音…")
         } catch (e: Exception) {
             Log.e(TAG, "capture start failed", e)
-            SessionBus.setStatus(SessionBus.Status.Error, e.message ?: "音频采集启动失败")
-            stopEverything(e.message ?: "音频采集启动失败")
+            stopEverything(e.message ?: "音频采集启动失败", asError = true)
         }
     }
 
@@ -323,7 +402,7 @@ class SubtitleSessionService : Service() {
         }
     }
 
-    private fun startAsForeground() {
+    private fun buildNotification(): Notification {
         val stopIntent = Intent(this, SubtitleSessionService::class.java).setAction(ACTION_STOP)
         val stopPi = PendingIntent.getService(
             this,
@@ -337,7 +416,7 @@ class SubtitleSessionService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val notification: Notification = NotificationCompat.Builder(this, LiveTranslateApp.CHANNEL_SUBTITLE)
+        return NotificationCompat.Builder(this, LiveTranslateApp.CHANNEL_SUBTITLE)
             .setContentTitle(getString(R.string.notification_subtitle_running))
             .setContentText(getString(R.string.notification_subtitle_text))
             .setSmallIcon(R.mipmap.ic_launcher)
@@ -345,7 +424,10 @@ class SubtitleSessionService : Service() {
             .addAction(0, getString(R.string.action_stop), stopPi)
             .setOngoing(true)
             .build()
+    }
 
+    private fun startAsForeground() {
+        val notification = buildNotification()
         val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             when (audioSourceMode) {
                 AudioSourceMode.MEDIA ->
@@ -367,50 +449,68 @@ class SubtitleSessionService : Service() {
         }
     }
 
-    private fun stopEverything(message: String) {
-        val inFull = fullInput.toString()
-        val outFull = fullOutput.toString()
-        if (inFull.isNotBlank() || outFull.isNotBlank()) {
-            SessionBus.markSessionFinished(inFull, outFull, message)
-        } else {
-            SessionBus.setStatus(SessionBus.Status.Stopped, message)
-        }
-        mediaCapturer?.stop()
+    /**
+     * Drop capturers / client / overlay / projection without finishing the Service.
+     * Used when re-starting a session or as part of [stopEverything].
+     */
+    private fun releaseSessionResources() {
+        settingsJob?.cancel()
+        settingsJob = null
+        eventsJob?.cancel()
+        eventsJob = null
+        runCatching { mediaCapturer?.stop() }
         mediaCapturer = null
-        micCapturer?.stop()
+        runCatching { micCapturer?.stop() }
         micCapturer = null
-        pcmMixer?.close()
+        runCatching { pcmMixer?.close() }
         pcmMixer = null
-        liveClient?.close()
-        liveClient?.destroy()
+        runCatching {
+            liveClient?.close()
+            liveClient?.destroy()
+        }
         liveClient = null
-        audioPlayer?.release()
+        runCatching { audioPlayer?.release() }
         audioPlayer = null
-        overlay?.hide()
+        runCatching { overlay?.hide() }
         overlay = null
         try {
             mediaProjection?.stop()
         } catch (_: Exception) {
         }
         mediaProjection = null
-        settingsJob?.cancel()
-        eventsJob?.cancel()
         captureStarted = false
-        stopForeground(STOP_FOREGROUND_REMOVE)
+    }
+
+    private fun stopEverything(message: String, asError: Boolean = false) {
+        if (stopping) return
+        stopping = true
+
+        val inFull = fullInput.toString()
+        val outFull = fullOutput.toString()
+        if (inFull.isNotBlank() || outFull.isNotBlank()) {
+            SessionBus.markSessionFinished(inFull, outFull, message)
+        } else if (asError) {
+            SessionBus.setStatus(SessionBus.Status.Error, message)
+        } else {
+            SessionBus.setStatus(SessionBus.Status.Stopped, message)
+        }
+
+        // Cancel start pipeline first so it cannot recreate resources after we drop them.
+        sessionJob?.cancel()
+        sessionJob = null
+        releaseSessionResources()
+
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
         stopSelf()
     }
 
     override fun onDestroy() {
-        mediaCapturer?.stop()
-        micCapturer?.stop()
-        pcmMixer?.close()
-        liveClient?.destroy()
-        audioPlayer?.release()
-        overlay?.hide()
-        try {
-            mediaProjection?.stop()
-        } catch (_: Exception) {
-        }
+        stopping = true
+        sessionJob?.cancel()
+        sessionJob = null
+        releaseSessionResources()
+        commandJob?.cancel()
+        commandJob = null
         scope.cancel()
         ioScope.cancel()
         super.onDestroy()

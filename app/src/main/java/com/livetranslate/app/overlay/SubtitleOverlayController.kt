@@ -69,6 +69,13 @@ class SubtitleOverlayController(
 
     private var callbacksRegistered = false
 
+    /**
+     * Show the floating subtitle window.
+     *
+     * @throws IllegalStateException if the system rejects the overlay (missing
+     *   SYSTEM_ALERT_WINDOW, OEM restriction, bad token, etc.). Callers must catch
+     *   this — uncaught exceptions on the main thread can crash the process.
+     */
     fun show(initial: UserSettings) {
         if (rootView != null) {
             updateSettings(initial)
@@ -112,11 +119,29 @@ class SubtitleOverlayController(
             this.x = x
             this.y = y
         }
-        layoutParams = params
 
         val view = buildOverlayView(density)
+        try {
+            windowManager.addView(view, params)
+        } catch (t: Throwable) {
+            // Roll back partial state so a later retry can call show() again.
+            rootView = null
+            layoutParams = null
+            inputView = null
+            outputView = null
+            inputScroll = null
+            outputScroll = null
+            dividerView = null
+            inputSection = null
+            container = null
+            Log.e(TAG, "addView failed", t)
+            throw IllegalStateException(
+                "无法显示悬浮字幕窗，请检查悬浮窗权限后重试",
+                t,
+            )
+        }
+        layoutParams = params
         rootView = view
-        windowManager.addView(view, params)
         registerCallbacks()
         applySettingsToViews()
         applyTranscriptsToViews()
