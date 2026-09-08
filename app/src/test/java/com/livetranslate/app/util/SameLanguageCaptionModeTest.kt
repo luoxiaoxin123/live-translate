@@ -79,4 +79,36 @@ class SameLanguageCaptionModeTest {
         assertNull(mode.onDetectedInputLanguage("  ", "zh-Hans"))
         assertFalse(mode.enabled)
     }
+
+    @Test
+    fun translatedAudioFollowsUserSettingUntilSameLanguage() {
+        val mode = SameLanguageCaptionMode()
+        assertTrue(mode.shouldPlayTranslatedAudio(userEnabled = true))
+        assertFalse(mode.shouldPlayTranslatedAudio(userEnabled = false))
+
+        mode.onDetectedInputLanguage("zh-Hans", "zh-Hans")
+        assertFalse(mode.shouldPlayTranslatedAudio(userEnabled = true))
+        assertFalse(mode.shouldPlayTranslatedAudio(userEnabled = false))
+    }
+
+    @Test
+    fun translatedAudioResumesAfterLeavingSameLanguage() {
+        val mode = SameLanguageCaptionMode()
+        mode.onDetectedInputLanguage("zh-Hans", "zh-Hans")
+        mode.onDetectedInputLanguage("en", "zh-Hans")
+        assertFalse(mode.shouldPlayTranslatedAudio(userEnabled = true))
+
+        mode.onDetectedInputLanguage("en", "zh-Hans")
+        assertFalse(mode.enabled)
+        assertTrue(mode.shouldPlayTranslatedAudio(userEnabled = true))
+    }
+
+    @Test
+    fun resetRestoresTranslatedAudio() {
+        val mode = SameLanguageCaptionMode()
+        mode.onDetectedInputLanguage("zh", "zh-Hans")
+        assertFalse(mode.shouldPlayTranslatedAudio(userEnabled = true))
+        mode.reset()
+        assertTrue(mode.shouldPlayTranslatedAudio(userEnabled = true))
+    }
 }

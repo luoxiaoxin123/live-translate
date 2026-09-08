@@ -2,11 +2,13 @@ package com.livetranslate.app.util
 
 /**
  * Session-scoped switch: when input is already the target language, the overlay
- * should show a single caption line instead of bilingual source/translation.
+ * should show a single caption line instead of bilingual source/translation,
+ * and echoed translation audio should stay silent so it does not double the
+ * source soundtrack.
  *
  * Enter on the first matching language code (or a high-confidence script
  * fallback). Leave only after two consecutive mismatches so a single
- * mis-detected token does not flicker the layout.
+ * mis-detected token does not flicker the layout or unmute a false echo.
  */
 class SameLanguageCaptionMode {
     var enabled: Boolean = false
@@ -14,6 +16,12 @@ class SameLanguageCaptionMode {
 
     private var matchStreak = 0
     private var mismatchStreak = 0
+
+    /**
+     * Translation PCM should play only when the user turned it on and the
+     * source is not already the target language (echo would double the video).
+     */
+    fun shouldPlayTranslatedAudio(userEnabled: Boolean): Boolean = userEnabled && !enabled
 
     fun reset() {
         enabled = false

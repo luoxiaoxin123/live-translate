@@ -224,7 +224,7 @@ class SubtitleSessionService : Service() {
 
             val player = TranslatedAudioPlayer()
             audioPlayer = player
-            player.setEnabled(currentSettings.playTranslatedAudio)
+            applyTranslatedAudioEnabled()
             player.setVolume(currentSettings.translatedVolume)
 
             eventsJob = scope.launch {
@@ -250,7 +250,7 @@ class SubtitleSessionService : Service() {
                     // Audio on its own droppable channel; transcripts on
                     // client.events are never dropped (SUSPEND overflow).
                     client.audioChunks.collect { event ->
-                        if (currentSettings.playTranslatedAudio) {
+                        if (sameLanguageMode.shouldPlayTranslatedAudio(currentSettings.playTranslatedAudio)) {
                             player.playPcm(event.pcm, event.mimeType)
                         }
                     }
@@ -317,7 +317,7 @@ class SubtitleSessionService : Service() {
                             prev.translatedVolume != s.translatedVolume
                     if (!appearanceOrAudioChanged) return@collectLatest
                     overlay?.updateSettings(s)
-                    player.setEnabled(s.playTranslatedAudio)
+                    applyTranslatedAudioEnabled()
                     player.setVolume(s.translatedVolume)
                     if (prev.playTranslatedAudio && !s.playTranslatedAudio) {
                         Log.i(TAG, "translated audio disabled")
@@ -457,11 +457,24 @@ class SubtitleSessionService : Service() {
 
     /**
      * Collapse or restore the overlay when source language equals the target.
-     * When collapsed, the input transcript is shown as the single caption line.
+     * When collapsed, the input transcript is shown as the single caption line
+     * and echoed translation audio is muted so it does not double the source.
      */
     private fun applyCaptionMode(enabled: Boolean) {
         overlay?.setSameLanguageMode(enabled)
+        applyTranslatedAudioEnabled()
         publishCaptionUpdate(inputChanged = true, outputChanged = true)
+    }
+
+    /**
+     * Play translation audio only when the user asked for it *and* the source
+     * is a different language. Same-language sessions still request echo from
+     * the API (needed for captions) but drop the parroted PCM locally.
+     */
+    private fun applyTranslatedAudioEnabled() {
+        audioPlayer?.setEnabled(
+            sameLanguageMode.shouldPlayTranslatedAudio(currentSettings.playTranslatedAudio),
+        )
     }
 
     private fun publishCaptionUpdate(inputChanged: Boolean, outputChanged: Boolean) {
