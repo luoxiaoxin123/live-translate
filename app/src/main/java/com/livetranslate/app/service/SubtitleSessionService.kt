@@ -63,6 +63,10 @@ class SubtitleSessionService : Service() {
     private var sessionJob: Job? = null
     private var reconnectJob: Job? = null
     private var reconnectAttempts = 0
+    private var currentApiKey = ""
+    private var rotateKeyNext = false
+    /** True while a connection carrying a resumption handle has not reached setupComplete. */
+    private var resumePending = false
 
     private var currentSettings: UserSettings = UserSettings()
     private var audioSourceMode: AudioSourceMode = AudioSourceMode.MEDIA
@@ -139,6 +143,9 @@ class SubtitleSessionService : Service() {
         }
         stopping = false
         reconnectAttempts = 0
+        currentApiKey = ""
+        rotateKeyNext = false
+        resumePending = false
         SessionBus.setStatus(SessionBus.Status.Starting, AppStrings.get(R.string.status_starting))
         SessionBus.clearExport()
         accumulatedInput.clear()
@@ -231,11 +238,7 @@ class SubtitleSessionService : Service() {
                 launch {
                     client.connectionState.collect { state ->
                         when (state) {
-                            is LiveTranslateClient.ConnectionState.Ready -> {
-                                reconnectAttempts = 0
-                                SessionBus.setStatus(SessionBus.Status.Running, AppStrings.get(R.string.status_translating))
-                                startCapturePipeline(client)
-                            }
+                            is LiveTranslateClient.ConnectionState.Ready -> onConnectionReady(client)
                             is LiveTranslateClient.ConnectionState.Failed -> {
                                 handleConnectionLoss(state.message)
                             }
@@ -257,11 +260,7 @@ class SubtitleSessionService : Service() {
                 }
                 client.events.collect { event ->
                     when (event) {
-                        is LiveTranslateClient.LiveEvent.SetupComplete -> {
-                            reconnectAttempts = 0
-                            SessionBus.setStatus(SessionBus.Status.Running, AppStrings.get(R.string.status_translating))
-                            startCapturePipeline(client)
-                        }
+                        is LiveTranslateClient.LiveEvent.SetupComplete -> onConnectionReady(client)
                         is LiveTranslateClient.LiveEvent.InputTranscript -> {
                             appendTranscript(accumulatedInput, event.text)
                             appendFull(fullInput, event.text)
@@ -290,11 +289,7 @@ class SubtitleSessionService : Service() {
                             publishCaptionUpdate(inputChanged = false, outputChanged = true)
                         }
                         is LiveTranslateClient.LiveEvent.AudioChunk -> Unit
-                        is LiveTranslateClient.LiveEvent.GoAway -> {
-                            // Connection is about to be terminated by the server
-                            // (~10-minute cap) — resume on a fresh connection.
-                            scheduleReconnect(AppStrings.get(R.string.status_server_goaway))
-                        }
+                        is LiveTranslateClient.LiveEvent.GoAway -> rotateConnection(event.timeLeftMs)
                         is LiveTranslateClient.LiveEvent.Error -> {
                             handleConnectionLoss(event.message)
                         }
@@ -327,39 +322,89 @@ class SubtitleSessionService : Service() {
 
             yield()
             currentCoroutineContext().ensureActive()
-            // Rotate keys: try first available via round-robin start index
-            val key = app.apiKeyStore.nextRotatedKey()
-            if (key.isBlank()) {
-                SessionBus.setStatus(SessionBus.Status.Error, AppStrings.get(R.string.msg_need_api_key))
-                stopEverything(AppStrings.get(R.string.msg_need_api_key), error = true)
-                return
-            }
-            client.connect(
-                LiveTranslateClient.SessionConfig(
-                    endpoint = currentSettings.endpoint,
-                    apiKey = key,
-                    modelId = currentSettings.modelId,
-                    targetLanguageCode = SupportedLanguages.canonicalOrDefault(
-                        currentSettings.targetLanguageCode,
-                    ),
-                    // Official: when input is already the target language, echo
-                    // instead of staying silent so same-language audio still
-                    // produces captions (e.g. Chinese video → Chinese subtitles).
-                    echoTargetLanguage = true,
-                ),
-            )
+            connectLive()
     }
 
     /**
-     * Connection died or the server announced it will die. If the session is
-     * resumable and retries remain, reconnect transparently; otherwise stop.
+     * Connect (or reconnect) the live client. A session keeps one API key so
+     * resumption handles stay valid; the key only rotates after a quota error.
+     * Resumes the server session when a handle is known, else starts a new one.
+     */
+    private fun connectLive() {
+        val client = liveClient ?: return
+        if (currentApiKey.isBlank() || rotateKeyNext) {
+            // Rotate keys: round-robin start index across stored keys.
+            currentApiKey = (application as LiveTranslateApp).apiKeyStore.nextRotatedKey()
+            rotateKeyNext = false
+        }
+        if (currentApiKey.isBlank()) {
+            stopEverything(AppStrings.get(R.string.msg_need_api_key), error = true)
+            return
+        }
+        val handle = client.lastResumptionHandle
+        resumePending = handle != null
+        client.connect(
+            LiveTranslateClient.SessionConfig(
+                endpoint = currentSettings.endpoint,
+                apiKey = currentApiKey,
+                modelId = currentSettings.modelId,
+                targetLanguageCode = SupportedLanguages.canonicalOrDefault(
+                    currentSettings.targetLanguageCode,
+                ),
+                // Official: when input is already the target language, echo
+                // instead of staying silent so same-language audio still
+                // produces captions (e.g. Chinese video → Chinese subtitles).
+                echoTargetLanguage = true,
+                resumptionHandle = handle,
+            ),
+        )
+    }
+
+    private fun onConnectionReady(client: LiveTranslateClient) {
+        reconnectAttempts = 0
+        if (resumePending) {
+            resumePending = false
+            Log.i(TAG, "session resumed")
+        }
+        SessionBus.setStatus(SessionBus.Status.Running, AppStrings.get(R.string.status_translating))
+        startCapturePipeline(client)
+    }
+
+    /**
+     * Planned rotation: the server ends every connection after ~10 minutes and
+     * sends goAway first. Not a failure — switch to a fresh connection at once
+     * (no backoff, no retry budget, no "connection lost" status) and resume the
+     * same session. Audio captured during the handover is buffered by the
+     * client and replayed after setup, so nothing said in the gap is lost.
+     */
+    private fun rotateConnection(timeLeftMs: Long?) {
+        if (stopping || reconnectJob?.isActive == true) return
+        Log.i(TAG, "goAway (timeLeft=$timeLeftMs ms): rotating connection")
+        connectLive()
+    }
+
+    /**
+     * Connection died unexpectedly. Reconnect with backoff while retries
+     * remain — resuming the session when possible, otherwise as a new
+     * session — and stop only once the retry budget is spent.
      */
     private fun handleConnectionLoss(message: String) {
         if (stopping) return
-        val client = liveClient
-        if (client == null || client.lastResumptionHandle == null ||
-            reconnectAttempts >= MAX_RECONNECTS
-        ) {
+        // Failed state and Error event can both report the same loss —
+        // dedupe while a reconnect is already scheduled.
+        if (reconnectJob?.isActive == true) return
+        if (resumePending) {
+            // The resumed connection died before setup (e.g. an expired or
+            // rejected handle). Retry as a new session so a stale handle can't
+            // trap us in a retry loop.
+            resumePending = false
+            liveClient?.forgetResumptionHandle()
+            Log.w(TAG, "resume failed before setup; next attempt starts a new session")
+        }
+        if (LiveTranslateClient.isQuotaError(message)) rotateKeyNext = true
+        // Never connected (bad key, endpoint, network): report right away
+        // instead of retrying a setup that is unlikely to succeed.
+        if (liveClient == null || !captureStarted || reconnectAttempts >= MAX_RECONNECTS) {
             stopEverything(message, error = true)
             return
         }
@@ -367,20 +412,10 @@ class SubtitleSessionService : Service() {
     }
 
     /**
-     * Reconnect with the last resumption handle. The capture pipeline keeps
-     * running — sendPcm16le silently drops frames until setupComplete, so no
-     * special buffering is needed for a short reconnect window.
+     * Reconnect after a backoff. The capture pipeline keeps running; the
+     * client buffers audio until the new connection completes setup.
      */
     private fun scheduleReconnect(reason: String) {
-        if (stopping) return
-        // Failed state and Error event can both report the same loss —
-        // dedupe while a reconnect is already scheduled.
-        if (reconnectJob?.isActive == true) return
-        val client = liveClient ?: return
-        val handle = client.lastResumptionHandle ?: run {
-            stopEverything(reason, error = true)
-            return
-        }
         reconnectAttempts++
         val attempt = reconnectAttempts
         Log.w(TAG, "reconnect #$attempt after: $reason")
@@ -391,25 +426,7 @@ class SubtitleSessionService : Service() {
         reconnectJob = scope.launch {
             delay(RECONNECT_BASE_DELAY_MS * attempt)
             if (stopping) return@launch
-            val live = liveClient ?: return@launch
-            val app = application as LiveTranslateApp
-            val key = app.apiKeyStore.nextRotatedKey()
-            if (key.isBlank()) {
-                stopEverything(AppStrings.get(R.string.msg_need_api_key), error = true)
-                return@launch
-            }
-            live.connect(
-                LiveTranslateClient.SessionConfig(
-                    endpoint = currentSettings.endpoint,
-                    apiKey = key,
-                    modelId = currentSettings.modelId,
-                    targetLanguageCode = SupportedLanguages.canonicalOrDefault(
-                        currentSettings.targetLanguageCode,
-                    ),
-                    echoTargetLanguage = true,
-                    resumptionHandle = handle,
-                ),
-            )
+            connectLive()
         }
     }
 

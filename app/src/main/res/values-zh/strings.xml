@@ -164,7 +164,6 @@
     <string name="status_translating">翻译中</string>
     <string name="status_waiting_audio">翻译中 · 等待声音…</string>
     <string name="status_closed_by_user">已关闭</string>
-    <string name="status_server_goaway">服务端连接即将到期</string>
     <string name="status_reconnecting">连接中断（%1$s），正在自动续接…（%2$d/%3$d）</string>
     <string name="error_disconnected">连接已断开</string>
     <string name="error_projection_denied">录屏授权失败</string>

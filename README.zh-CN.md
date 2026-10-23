@@ -2,7 +2,7 @@
 
 > [!WARNING]
 > ⚠️ **注意：谷歌接口 10 分钟连接限制** ⚠️
-> Gemini Live API 的**每条 WebSocket 连接约 10 分钟就会被服务端断开**，这是**谷歌服务端的限制**（[官方文档](https://ai.google.dev/gemini-api/docs/live-api/session-management)），不是本应用的 bug。断开时应用会显示"连接中断，正在自动续接…"并**通过会话续接自动重连**，字幕随后继续——因此每隔约 10 分钟出现一次短暂停顿属于正常现象。
+> Gemini Live API 的**每条 WebSocket 连接约 10 分钟就会被服务端断开**，这是**谷歌服务端的限制**（[官方文档](https://ai.google.dev/gemini-api/docs/live-api/session-management)），不是本应用的 bug。应用会自动处理：收到服务端的提前通知后**切换到新连接并续接同一会话**，切换期间采集的音频先缓存、连上后补发，字幕不会漏话——每隔约 10 分钟最多出现一次短暂延迟。
 
 [English](README.md)
 

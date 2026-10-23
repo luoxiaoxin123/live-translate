@@ -72,8 +72,22 @@ class LiveTranslateClient {
     private var webSocket: WebSocket? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** Gate for live audio: true only while the current connection can take it. */
     private val setupComplete = AtomicBoolean(false)
+    /** The current connection reached setupComplete (stays true once it closes). */
+    private val connectionWasReady = AtomicBoolean(false)
     private val intentionalClose = AtomicBoolean(false)
+
+    /**
+     * Audio captured while no connection is ready (rotation / reconnect),
+     * replayed after the next setupComplete. Guarded by [pendingLock], which
+     * also orders the replay ahead of live chunks.
+     */
+    private val pendingLock = Any()
+    private val pendingAudio = PendingAudioBuffer(
+        maxBytes = MAX_PENDING_AUDIO_MS * BYTES_PER_MS_16K,
+        maxFrameBytes = REPLAY_FRAME_MS * BYTES_PER_MS_16K,
+    )
 
     /**
      * Latest session-resumption handle from the server. Non-null once the
@@ -83,6 +97,11 @@ class LiveTranslateClient {
     @Volatile
     var lastResumptionHandle: String? = null
         private set
+
+    /** Drop a handle the server rejected so the next connect starts a new session. */
+    fun forgetResumptionHandle() {
+        lastResumptionHandle = null
+    }
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Idle)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -146,6 +165,7 @@ class LiveTranslateClient {
         closeInternal(intentional = true, notify = false)
         intentionalClose.set(false)
         setupComplete.set(false)
+        connectionWasReady.set(false)
         _connectionState.value = ConnectionState.Connecting
 
         val key = config.apiKey.trim()
@@ -211,7 +231,9 @@ class LiveTranslateClient {
                 override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                     if (isStale(webSocket)) return
                     Log.i(TAG, "WebSocket closing: $code $reason")
-                    if (!intentionalClose.get() && !setupComplete.get()) {
+                    // Start buffering audio for the next connection.
+                    setupComplete.set(false)
+                    if (!intentionalClose.get() && !connectionWasReady.get()) {
                         fail(
                             AppStrings.get(
                                 R.string.client_error_closed_before_setup,
@@ -230,7 +252,7 @@ class LiveTranslateClient {
                         _connectionState.value = ConnectionState.Idle
                         return
                     }
-                    if (!setupComplete.get() && _connectionState.value !is ConnectionState.Failed) {
+                    if (!connectionWasReady.get() && _connectionState.value !is ConnectionState.Failed) {
                         fail(
                             AppStrings.get(
                                 R.string.client_error_closed,
@@ -286,11 +308,24 @@ class LiveTranslateClient {
         }
     }
 
+    /**
+     * Streams one PCM chunk. While no connection is ready (between connect and
+     * setupComplete, or after a drop) the chunk is buffered instead and
+     * replayed once the next connection completes setup.
+     */
     fun sendPcm16le(chunk: ByteArray, sampleRate: Int = 16_000) {
-        val ws = webSocket ?: return
-        if (!setupComplete.get()) return
         if (chunk.isEmpty()) return
+        synchronized(pendingLock) {
+            val ws = webSocket
+            if (ws == null || !setupComplete.get()) {
+                pendingAudio.add(chunk)
+                return
+            }
+            sendAudio(ws, chunk, sampleRate)
+        }
+    }
 
+    private fun sendAudio(ws: WebSocket, chunk: ByteArray, sampleRate: Int) {
         val b64 = Base64.encodeToString(chunk, Base64.NO_WRAP)
         val msg = JSONObject()
             .put(
@@ -311,6 +346,7 @@ class LiveTranslateClient {
 
     fun close() {
         closeInternal(intentional = true, notify = true)
+        synchronized(pendingLock) { pendingAudio.clear() }
     }
 
     fun destroy() {
@@ -337,6 +373,7 @@ class LiveTranslateClient {
     }
 
     private fun fail(message: String) {
+        setupComplete.set(false)
         _connectionState.value = ConnectionState.Failed(message)
         emitEvent(LiveEvent.Error(message))
     }
@@ -367,7 +404,7 @@ class LiveTranslateClient {
 
             // setupComplete may be empty object: { "setupComplete": {} }
             if (root.has("setupComplete") || root.has("setup_complete")) {
-                setupComplete.set(true)
+                completeSetup()
                 // State first (sync) so pollers never miss Ready even if event is dropped.
                 _connectionState.value = ConnectionState.Ready
                 // tryEmit is non-suspending; fall back to launch if buffer full
@@ -473,6 +510,23 @@ class LiveTranslateClient {
         }
     }
 
+    /** Replay audio buffered between connections, then let live audio through. */
+    private fun completeSetup() {
+        synchronized(pendingLock) {
+            val ws = webSocket
+            if (ws != null && pendingAudio.sizeBytes > 0) {
+                Log.i(
+                    TAG,
+                    "replaying ${pendingAudio.sizeBytes / BYTES_PER_MS_16K} ms of buffered audio" +
+                        " (dropped ${pendingAudio.droppedBytes / BYTES_PER_MS_16K} ms)",
+                )
+                pendingAudio.drain().forEach { sendAudio(ws, it, 16_000) }
+            }
+            setupComplete.set(true)
+            connectionWasReady.set(true)
+        }
+    }
+
     /**
      * Build setup message matching google-genai mldev converter:
      * - responseModalities + translationConfig → generationConfig
@@ -543,5 +597,16 @@ class LiveTranslateClient {
 
     companion object {
         private const val TAG = "LiveTranslateClient"
+
+        /** 16 kHz mono PCM16: 32 bytes per millisecond. */
+        private const val BYTES_PER_MS_16K = 32
+        private const val MAX_PENDING_AUDIO_MS = 10_000
+        private const val REPLAY_FRAME_MS = 1_000
+
+        /** Quota / rate-limit failures: retry on the next stored API key. */
+        fun isQuotaError(message: String): Boolean =
+            message.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
+                message.contains("quota", ignoreCase = true) ||
+                message.contains("429")
     }
 }

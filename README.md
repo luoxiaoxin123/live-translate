@@ -2,7 +2,7 @@
 
 > [!WARNING]
 > ⚠️ **NOTE — Google's 10-minute connection limit** ⚠️
-> The Gemini Live API terminates **every WebSocket connection after ~10 minutes**. This is a **Google server-side restriction** ([official docs](https://ai.google.dev/gemini-api/docs/live-api/session-management)), not a bug in this app. When it happens, the app shows "Connection lost — resuming automatically…" and **auto-reconnects with session resumption** so captions continue — a brief pause around every 10 minutes is expected behavior.
+> The Gemini Live API terminates **every WebSocket connection after ~10 minutes**. This is a **Google server-side restriction** ([official docs](https://ai.google.dev/gemini-api/docs/live-api/session-management)), not a bug in this app. The app handles it automatically: on the server's advance notice it **switches to a fresh connection and resumes the same session**, buffering the audio captured during the switch and replaying it afterwards, so captions continue without lost speech — at most a short delay roughly every 10 minutes.
 
 [中文文档](README.zh-CN.md)
 

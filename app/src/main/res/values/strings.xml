@@ -165,7 +165,6 @@
     <string name="status_translating">Translating</string>
     <string name="status_waiting_audio">Translating · waiting for audio…</string>
     <string name="status_closed_by_user">Closed</string>
-    <string name="status_server_goaway">Server connection is about to expire</string>
     <string name="status_reconnecting">Connection lost (%1$s) — resuming automatically… (%2$d/%3$d)</string>
     <string name="error_disconnected">Connection closed</string>
     <string name="error_projection_denied">Screen-capture permission denied</string>
