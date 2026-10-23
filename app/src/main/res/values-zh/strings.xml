@@ -46,7 +46,7 @@
     <string name="settings_endpoint">API 端点</string>
     <string name="settings_api_key">API Key</string>
     <string name="settings_api_key_n">API Key %1$d</string>
-    <string name="settings_api_keys_hint">最多 10 个 Key，启动会话时按顺序轮询使用。</string>
+    <string name="settings_api_keys_hint">最多 10 个 Key。固定使用一个，报错或额度用完时自动切换到下一个。</string>
     <string name="settings_model_id">模型 ID</string>
     <string name="settings_show">显示</string>
     <string name="settings_hide">隐藏</string>
@@ -165,6 +165,7 @@
     <string name="status_waiting_audio">翻译中 · 等待声音…</string>
     <string name="status_closed_by_user">已关闭</string>
     <string name="status_reconnecting">连接中断（%1$s），正在自动续接…（%2$d/%3$d）</string>
+    <string name="status_switching_key">API Key 不可用（%1$s），正在切换到下一个 Key…</string>
     <string name="error_disconnected">连接已断开</string>
     <string name="error_projection_denied">录屏授权失败</string>
     <string name="error_no_projection">无法创建 MediaProjection</string>

@@ -46,7 +46,7 @@
     <string name="settings_endpoint">API endpoint</string>
     <string name="settings_api_key">API Key</string>
     <string name="settings_api_key_n">API Key %1$d</string>
-    <string name="settings_api_keys_hint">Add up to 10 keys. Sessions rotate keys in order.</string>
+    <string name="settings_api_keys_hint">Add up to 10 keys. One is used until it fails or runs out of quota, then the next takes over.</string>
     <string name="settings_model_id">Model ID</string>
     <string name="settings_show">Show</string>
     <string name="settings_hide">Hide</string>
@@ -166,6 +166,7 @@
     <string name="status_waiting_audio">Translating · waiting for audio…</string>
     <string name="status_closed_by_user">Closed</string>
     <string name="status_reconnecting">Connection lost (%1$s) — resuming automatically… (%2$d/%3$d)</string>
+    <string name="status_switching_key">API key failed (%1$s) — switching to the next key…</string>
     <string name="error_disconnected">Connection closed</string>
     <string name="error_projection_denied">Screen-capture permission denied</string>
     <string name="error_no_projection">Could not create MediaProjection</string>

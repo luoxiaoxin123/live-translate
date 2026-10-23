@@ -26,7 +26,7 @@ The app can capture **other apps' playback**, the **microphone**, or both, send 
 | **Audio capture** | Media: `MediaProjection` + `AudioPlaybackCapture`; mic: `AudioRecord` → 16 kHz PCM |
 | **Live API** | WebSocket + `translationConfig`, aligned with the official Live Translate docs. Sliding-window context compression + session resumption with auto-reconnect, so long sessions survive the server's ~10-minute connection cap |
 | **Translated voice** | Off by default; plays in parallel without pausing the video; volume up to **200%** (digital gain) |
-| **Multiple API keys** | Up to 10 keys; rotate on each session; connection test checks every key |
+| **Multiple API keys** | Up to 10 keys; one key is used until it fails (e.g. invalid or out of quota), then the next takes over; connection test checks every key |
 | **Export** | After stop, export this session as Markdown to Downloads |
 | **Settings** | Endpoint / keys / model, connection test, font size and background opacity, permissions, about |
 | **Language** | Follows the system: Chinese device language → Chinese UI; otherwise → English |

@@ -603,10 +603,16 @@ class LiveTranslateClient {
         private const val MAX_PENDING_AUDIO_MS = 10_000
         private const val REPLAY_FRAME_MS = 1_000
 
-        /** Quota / rate-limit failures: retry on the next stored API key. */
-        fun isQuotaError(message: String): Boolean =
-            message.contains("RESOURCE_EXHAUSTED", ignoreCase = true) ||
-                message.contains("quota", ignoreCase = true) ||
-                message.contains("429")
+        private val KEY_ERROR_MARKERS = listOf(
+            // Quota / rate limit
+            "RESOURCE_EXHAUSTED", "quota", "429",
+            // Invalid, revoked or unauthorized key
+            "API_KEY_INVALID", "API key not valid", "invalid api key",
+            "UNAUTHENTICATED", "PERMISSION_DENIED",
+        )
+
+        /** Failures tied to the API key itself (quota, invalid key): fail over to the next key. */
+        fun isKeyError(message: String): Boolean =
+            KEY_ERROR_MARKERS.any { message.contains(it, ignoreCase = true) }
     }
 }

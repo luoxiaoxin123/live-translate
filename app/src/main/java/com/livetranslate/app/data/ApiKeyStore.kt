@@ -9,11 +9,13 @@ import org.json.JSONArray
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Stores up to [MAX_KEYS] API keys (encrypted when possible) and supports rotation.
+ * Stores up to [MAX_KEYS] API keys (encrypted when possible). Sessions stick to
+ * the active key and only fail over to the next one when it errors or runs out
+ * of quota; the active index is in-memory only.
  */
 class ApiKeyStore(context: Context) {
     private val prefs: SharedPreferences = createPrefs(context.applicationContext)
-    private val rotateIndex = AtomicInteger(0)
+    private val activeIndex = AtomicInteger(0)
 
     fun getApiKeys(): List<String> {
         val raw = prefs.getString(KEY_API_LIST, null)
@@ -45,9 +47,9 @@ class ApiKeyStore(context: Context) {
             .putString(KEY_API, cleaned.firstOrNull().orEmpty()) // keep legacy field in sync
             .apply()
         if (cleaned.isEmpty()) {
-            rotateIndex.set(0)
+            activeIndex.set(0)
         } else {
-            rotateIndex.updateAndGet { it.coerceIn(0, cleaned.lastIndex) }
+            activeIndex.updateAndGet { it.coerceIn(0, cleaned.lastIndex) }
         }
     }
 
@@ -61,14 +63,30 @@ class ApiKeyStore(context: Context) {
 
     fun hasApiKey(): Boolean = getApiKeys().isNotEmpty()
 
-    /**
-     * Round-robin pick for a new session. Empty string if none.
-     */
-    fun nextRotatedKey(): String {
+    /** The key sessions use until it fails. Empty string if none. */
+    fun activeKey(): String {
         val keys = getApiKeys()
         if (keys.isEmpty()) return ""
-        val i = rotateIndex.getAndUpdate { (it + 1) % keys.size }
-        return keys[i % keys.size]
+        return keys[activeIndex.get().coerceIn(0, keys.lastIndex)]
+    }
+
+    /**
+     * [failed] errored or ran out of quota: make the key after it active and
+     * return that, or null when there is no other key to fall back to.
+     */
+    fun failoverFrom(failed: String): String? {
+        val keys = getApiKeys()
+        if (keys.size < 2) return null
+        val failedIndex = keys.indexOf(failed)
+        // If the keys were edited and [failed] is gone, the current active key
+        // (a different one) takes over.
+        val next = if (failedIndex >= 0) {
+            (failedIndex + 1) % keys.size
+        } else {
+            activeIndex.get().coerceIn(0, keys.lastIndex)
+        }
+        activeIndex.set(next)
+        return keys[next]
     }
 
     /**

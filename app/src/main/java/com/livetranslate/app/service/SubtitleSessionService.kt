@@ -64,7 +64,8 @@ class SubtitleSessionService : Service() {
     private var reconnectJob: Job? = null
     private var reconnectAttempts = 0
     private var currentApiKey = ""
-    private var rotateKeyNext = false
+    /** Keys that failed since the last successful setup; once all have, give up. */
+    private val failedKeys = mutableSetOf<String>()
     /** True while a connection carrying a resumption handle has not reached setupComplete. */
     private var resumePending = false
 
@@ -144,7 +145,7 @@ class SubtitleSessionService : Service() {
         stopping = false
         reconnectAttempts = 0
         currentApiKey = ""
-        rotateKeyNext = false
+        failedKeys.clear()
         resumePending = false
         SessionBus.setStatus(SessionBus.Status.Starting, AppStrings.get(R.string.status_starting))
         SessionBus.clearExport()
@@ -290,9 +291,9 @@ class SubtitleSessionService : Service() {
                         }
                         is LiveTranslateClient.LiveEvent.AudioChunk -> Unit
                         is LiveTranslateClient.LiveEvent.GoAway -> rotateConnection(event.timeLeftMs)
-                        is LiveTranslateClient.LiveEvent.Error -> {
-                            handleConnectionLoss(event.message)
-                        }
+                        // Every Error is paired with a Failed state, which drives
+                        // recovery; handling both would fail over twice per loss.
+                        is LiveTranslateClient.LiveEvent.Error -> Log.w(TAG, event.message)
                         is LiveTranslateClient.LiveEvent.Debug -> {
                             Log.d(TAG, event.message)
                         }
@@ -326,16 +327,14 @@ class SubtitleSessionService : Service() {
     }
 
     /**
-     * Connect (or reconnect) the live client. A session keeps one API key so
-     * resumption handles stay valid; the key only rotates after a quota error.
-     * Resumes the server session when a handle is known, else starts a new one.
+     * Connect (or reconnect) the live client on the current API key, which only
+     * changes when it fails (see [failOverKey]). Resumes the server session
+     * when a handle is known, else starts a new one.
      */
     private fun connectLive() {
         val client = liveClient ?: return
-        if (currentApiKey.isBlank() || rotateKeyNext) {
-            // Rotate keys: round-robin start index across stored keys.
-            currentApiKey = (application as LiveTranslateApp).apiKeyStore.nextRotatedKey()
-            rotateKeyNext = false
+        if (currentApiKey.isBlank()) {
+            currentApiKey = (application as LiveTranslateApp).apiKeyStore.activeKey()
         }
         if (currentApiKey.isBlank()) {
             stopEverything(AppStrings.get(R.string.msg_need_api_key), error = true)
@@ -362,6 +361,7 @@ class SubtitleSessionService : Service() {
 
     private fun onConnectionReady(client: LiveTranslateClient) {
         reconnectAttempts = 0
+        failedKeys.clear()
         if (resumePending) {
             resumePending = false
             Log.i(TAG, "session resumed")
@@ -390,8 +390,8 @@ class SubtitleSessionService : Service() {
      */
     private fun handleConnectionLoss(message: String) {
         if (stopping) return
-        // Failed state and Error event can both report the same loss —
-        // dedupe while a reconnect is already scheduled.
+        // A Closed after Failed (or vice versa) for the same loss — dedupe
+        // while a reconnect is already scheduled.
         if (reconnectJob?.isActive == true) return
         if (resumePending) {
             // The resumed connection died before setup (e.g. an expired or
@@ -401,7 +401,7 @@ class SubtitleSessionService : Service() {
             liveClient?.forgetResumptionHandle()
             Log.w(TAG, "resume failed before setup; next attempt starts a new session")
         }
-        if (LiveTranslateClient.isQuotaError(message)) rotateKeyNext = true
+        if (LiveTranslateClient.isKeyError(message) && failOverKey(message)) return
         // Never connected (bad key, endpoint, network): report right away
         // instead of retrying a setup that is unlikely to succeed.
         if (liveClient == null || !captureStarted || reconnectAttempts >= MAX_RECONNECTS) {
@@ -409,6 +409,24 @@ class SubtitleSessionService : Service() {
             return
         }
         scheduleReconnect(message)
+    }
+
+    /**
+     * The current key is invalid or out of quota: switch to the next stored key
+     * right away (no backoff, no retry budget). False once every key has failed
+     * — the loss is then handled as usual (stop, or retry with backoff).
+     */
+    private fun failOverKey(message: String): Boolean {
+        failedKeys += currentApiKey
+        val next = (application as LiveTranslateApp).apiKeyStore.failoverFrom(currentApiKey)
+        if (next == null || next in failedKeys) return false
+        Log.w(TAG, "API key failed ($message); switching to the next key")
+        currentApiKey = next
+        // A handle belongs to the old key's project; start a new session.
+        liveClient?.forgetResumptionHandle()
+        SessionBus.setStatus(SessionBus.Status.Starting, AppStrings.get(R.string.status_switching_key, message))
+        connectLive()
+        return true
     }
 
     /**
