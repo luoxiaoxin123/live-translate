@@ -6,6 +6,7 @@ import android.app.Application
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -19,22 +20,30 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Subtitles
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.livetranslate.app.BuildConfig
 import com.livetranslate.app.LiveTranslateApp
 import com.livetranslate.app.R
 import com.livetranslate.app.data.AudioSourceMode
@@ -47,13 +56,18 @@ import com.livetranslate.app.ui.subtitle.SubtitleScreen
 import com.livetranslate.app.ui.subtitle.SubtitleViewModel
 import com.livetranslate.app.ui.subtitle.SubtitleViewModelFactory
 import com.livetranslate.app.ui.theme.AppTheme
+import com.livetranslate.app.update.AvailableUpdate
+import com.livetranslate.app.update.UpdateChecker
 import com.livetranslate.app.util.PermissionUtils
 import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.NavigationBar
 import top.yukonga.miuix.kmp.basic.NavigationBarDisplayMode
 import top.yukonga.miuix.kmp.basic.NavigationBarItem
 import top.yukonga.miuix.kmp.basic.Scaffold
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +96,19 @@ class MainActivity : ComponentActivity() {
                 val exportMessage by subtitleVm.exportMessage.collectAsStateWithLifecycle()
 
                 var pendingStart by remember { mutableStateOf(false) }
+
+                // Checked once per launch; rememberSaveable keeps rotation from re-asking.
+                var updateChecked by rememberSaveable { mutableStateOf(false) }
+                var update by remember { mutableStateOf<AvailableUpdate?>(null) }
+                var showUpdate by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    if (updateChecked) return@LaunchedEffect
+                    updateChecked = true
+                    UpdateChecker.check(BuildConfig.VERSION_NAME)?.let {
+                        update = it
+                        showUpdate = true
+                    }
+                }
 
                 val projectionLauncher = rememberLauncherForActivityResult(
                     ActivityResultContracts.StartActivityForResult(),
@@ -256,6 +283,20 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+
+                update?.let { available ->
+                    UpdateDialog(
+                        show = showUpdate,
+                        update = available,
+                        onCancel = { showUpdate = false },
+                        onDownload = {
+                            showUpdate = false
+                            runCatching {
+                                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(available.url)))
+                            }
+                        },
+                    )
+                }
             }
         }
     }
@@ -285,5 +326,37 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "MainActivity"
+    }
+}
+
+@Composable
+private fun UpdateDialog(
+    show: Boolean,
+    update: AvailableUpdate,
+    onCancel: () -> Unit,
+    onDownload: () -> Unit,
+) {
+    WindowDialog(
+        show = show,
+        title = stringResource(R.string.update_title),
+        summary = stringResource(R.string.update_summary, update.version, BuildConfig.VERSION_NAME),
+        onDismissRequest = onCancel,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            TextButton(
+                text = stringResource(R.string.update_cancel),
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                text = stringResource(R.string.update_download),
+                onClick = onDownload,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.textButtonColorsPrimary(),
+            )
+        }
     }
 }

@@ -220,4 +220,9 @@
     <string name="msg_start_failed">Start failed: %1$s</string>
     <string name="msg_requesting_projection">Requesting screen capture…</string>
     <string name="msg_key_saved">API Key saved</string>
+    <!-- Update check -->
+    <string name="update_title">New version available</string>
+    <string name="update_summary">Live Translate %1$s is out (you have %2$s). Download it from GitHub Releases?</string>
+    <string name="update_cancel">Cancel</string>
+    <string name="update_download">Download</string>
 </resources>
