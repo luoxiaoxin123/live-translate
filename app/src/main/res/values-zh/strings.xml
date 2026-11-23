@@ -158,6 +158,7 @@
 
     <string name="msg_need_api_key">请先在设置中填写 API Key</string>
     <string name="msg_need_permissions">需要麦克风/通知权限</string>
+    <string name="msg_need_overlay">需要悬浮窗权限</string>
 
     <!-- 字幕页状态栏显示的会话状态 / 错误 -->
     <string name="status_restarting">重新启动</string>

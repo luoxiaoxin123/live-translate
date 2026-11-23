@@ -159,6 +159,7 @@
 
     <string name="msg_need_api_key">Please enter an API Key in Settings first</string>
     <string name="msg_need_permissions">Microphone/notification permission required</string>
+    <string name="msg_need_overlay">Overlay permission required</string>
 
     <!-- Session status / errors (shown in the Subtitles tab status line) -->
     <string name="status_restarting">Restarting</string>
